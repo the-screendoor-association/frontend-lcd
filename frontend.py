@@ -53,14 +53,22 @@ class FrontEnd(wx.Frame):
         # current_selected_text_box is an integer that ranges from 0 to 2
         # and represents which of the three textboxes on the screen has
         # the focus. current_top_ptr is an integer that represents the
-        # index of the top most textbox's menu item
+        # index of the top most textbox's menu item. using_settings is a
+        # boolean value that represents using the settings menu or using
+        # the main menu
         self.menu_ptr = 1
         self.current_selected_text_box = 0
         self.current_top_ptr = 1
+        self.using_settings = False
 
 	# This is the menu list. It starts out with settings as the only
         # entry. New entries are appended after asking the backend for them
         self.menu_items_list = ['                                \nSettings\n                                ']
+
+        # THis is the settings list. It has generic settings right now
+        self.settings_list = []
+        for setting in range(8):
+            self.settings_list.append('                                \nSetting {}\n                                '.format(setting))
 
 	# Center the GUI on the display
         self.Centre()
@@ -157,7 +165,7 @@ class FrontEnd(wx.Frame):
                        re-highlights the currently selected item
 
 	args:
-	    None
+            None
 
 	returns:
 	    None
@@ -165,13 +173,15 @@ class FrontEnd(wx.Frame):
 	raises:
 	    None
 	'''
+        
+        list_to_use = self.settings_list if self.using_settings else self.menu_items_list
 
-	# Load the menu items based on what the current_top_ptr is pointing to
-        self.firstTextBox.SetValue(self.menu_items_list[self.current_top_ptr])
-        self.secondTextBox.SetValue(self.menu_items_list[self.current_top_ptr+1])
-        self.thirdTextBox.SetValue(self.menu_items_list[self.current_top_ptr+2])
+        # Load the menu items based on what the current_top_ptr is pointing to
+        self.firstTextBox.SetValue(list_to_use[self.current_top_ptr])
+        self.secondTextBox.SetValue(list_to_use[self.current_top_ptr+1])
+        self.thirdTextBox.SetValue(list_to_use[self.current_top_ptr+2])
 
-	# re-highlight the currently selected item
+        # re-highlight the currently selected item
         self.highlightBox(self.text_box_num_dict[self.current_selected_text_box])
 
     def highlightBox(self, textBox):
@@ -226,21 +236,31 @@ class FrontEnd(wx.Frame):
                     self.current_selected_text_box-=1
                 self.menu_ptr-=1
 
-		# Set the new values since we changed positions
+                # Update the values in the text boxes
                 self.setValues()
 
 	# If the event is a down arrow key pressed...
         if self.key_by_ascii_dict[code] == 'down':
+            # Get the list to use
+            list_to_use = self.settings_list if self.using_settings else self.menu_items_list
 	    # Only do anything if we are not at the bottom of the list.
-	    # Increment the pointers based on where we are in the GUI.
-            if self.menu_ptr < len(self.menu_items_list)-1:
+	    # Increment the pointers based on where we are in the GUI
+            if self.menu_ptr < len(list_to_use)-1:
                 if self.menu_ptr - 2 == self.current_top_ptr:
                     self.current_top_ptr+=1
                 if self.current_selected_text_box != 2:
                     self.current_selected_text_box+=1
                 self.menu_ptr+=1
 
-		# Set the new values since we changed positions
+		# Update the values in the text boxes
+                self.setValues()
+
+        if self.key_by_ascii_dict[code] == 'enter':
+            if self.menu_ptr == 0:
+                self.using_settings = True
+                self.menu_ptr = 0
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 0
                 self.setValues()
 
 # If running this program by itself (Please only do this...)
