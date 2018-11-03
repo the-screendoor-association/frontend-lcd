@@ -263,6 +263,14 @@ class FrontEnd(wx.Frame):
                 self.current_top_ptr = 0
                 self.setValues()
 
+        if self.key_by_ascii_dict[code] == 'backspace':
+            if self.using_settings:
+                self.using_settings = False
+                self.menu_ptr = 1
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 1
+                self.setValues()
+
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
     # Create an instance of a wx Application
