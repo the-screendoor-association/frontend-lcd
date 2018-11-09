@@ -2,19 +2,25 @@
  frontend.py
  User interface for ScreenDoorSDP
  Author: David Greeson
- Created: 10/22/18
+ Created: 10/22/2018
  Last Modified By: David Greeson
- Last Modified: 10/26/18
+ Last Modified: 11/08/2018
 '''
 
-import wx
+import wx, gnsq, threading
 from datetime import datetime
+
+call_rec_reader = gnsq.Reader('call_received', 'call_rec', '127.0.0.1:4150')
+hist_give_reader = gnsq.Reader('history_give', 'hist_give', '127.0.0.1:4150')
+set_all_reader = gnsq.Reader('settings_all', 'set_all', '127.0.0.1:4150')
+set_give_reader = gnsq.Reader('setting_give', 'set_give', '127.0.0.1:4150')
 
 class FrontEnd(wx.Frame):
     '''
     FrontEnd class which contains the GUI and all of the elements involved in
     communicating between the user and the backend
     '''
+
     def __init__(self, parent, title):
         '''
         function:
@@ -24,7 +30,7 @@ class FrontEnd(wx.Frame):
                       to be used throughout this GUI, and loads the call history
 
         args:
-            parent: The parentn object (using default)
+            parent: The parent object (using default)
             title: the title of the GUI which is passed in when creating the
                        FrontEnd object
 
@@ -76,6 +82,8 @@ class FrontEnd(wx.Frame):
 	# Load the other GUI elements
         self.setupGUIElements()
 
+        self.setupThreads()
+
 	# A dictionary so that I can dynamically use textboxes using only
 	# an index for reference.
         self.text_box_num_dict = {0:self.firstTextBox,
@@ -84,6 +92,42 @@ class FrontEnd(wx.Frame):
 
 	# Ask the backend for a call history of 5 elements to start with
         self.loadCallHistory(5)
+
+    @call_rec_reader.on_message.connect
+    def call_rec_handler(reader, message):
+        print 'Got call received message: {}'.format(message.body)
+
+    @hist_give_reader.on_message.connect
+    def hist_give_handler(reader, message):
+		print 'Got history give message: {}'.format(message.body)
+
+    @set_all_reader.on_message.connect
+    def set_all_handler(reader, message):
+		print 'Got settings all message: {}'.format(message.body)
+
+    @set_give_reader.on_message.connect
+    def set_give_handler(reader, message):
+		print 'Got setting give message: {}'.format(message.body)        
+
+    def call_rec_reader_thread(self):
+        call_rec_reader.start()
+
+    def hist_give_reader_thread(self):
+	    hist_give_reader.start()
+
+    def set_all_reader_thread(self):
+	    set_all_reader.start()
+
+    def set_give_reader_thread(self):
+	    set_give_reader.start()
+
+    def setupThreads(self):
+        reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
+
+        for reader_thread in reader_threads:
+            t = threading.Thread(target=reader_thread)
+            t.daemon = True
+            t.start()
 
     def setupGUIElements(self):
 	'''
@@ -273,6 +317,7 @@ class FrontEnd(wx.Frame):
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
+
     # Create an instance of a wx Application
     app = wx.App()
 
