@@ -10,10 +10,10 @@
 import wx, gnsq, threading
 from datetime import datetime
 
-call_rec_reader = gnsq.Reader('call_received', 'call_rec', '127.0.0.1:4150')
-hist_give_reader = gnsq.Reader('history_give', 'hist_give', '127.0.0.1:4150')
-set_all_reader = gnsq.Reader('settings_all', 'set_all', '127.0.0.1:4150')
-set_give_reader = gnsq.Reader('setting_give', 'set_give', '127.0.0.1:4150')
+call_rec_reader = gnsq.Reader('call_received', 'frontend_lcd', '127.0.0.1:4150')
+hist_give_reader = gnsq.Reader('history_give', 'frontend_lcd', '127.0.0.1:4150')
+set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
+set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
 
 global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
 CALL_REC = False
