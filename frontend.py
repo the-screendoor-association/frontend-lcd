@@ -143,11 +143,14 @@ class FrontEnd(wx.Frame):
 
     def setupThreads(self):
         reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
-
+	reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
         for reader_thread in reader_threads:
             t = threading.Thread(target=reader_thread)
             t.daemon = True
             t.start()
+
+	for reader_obj in reader_objs:
+	    reader_obj.join()
 
 	t = threading.Thread(target=self.checkForMessages)
 	t.daemon = True
