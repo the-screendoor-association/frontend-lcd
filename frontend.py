@@ -51,10 +51,10 @@ class FrontEnd(wx.Frame):
             None
         '''
 
-	# Call the super class to build the GUI
+        # Call the super class to build the GUI
         super(FrontEnd, self).__init__(parent,title=title, size=(800,480))
 
-	# The key_by_ascii_dict is used to convert ascii characters into
+        # The key_by_ascii_dict is used to convert ascii characters into
         # easier to understand buttons on the keyboard
         self.key_by_ascii_dict = {314:'left',
                                   315:'up',
@@ -64,7 +64,7 @@ class FrontEnd(wx.Frame):
                                   8  :'backspace',
                                   307:'alt'}
 
-	# These 3 pointers help to keep up with what to display on the GUI.
+        # These 3 pointers help to keep up with what to display on the GUI.
         # menu_ptr is the list index of the currently selected menu item.
         # current_selected_text_box is an integer that ranges from 0 to 2
         # and represents which of the three textboxes on the screen has
@@ -77,7 +77,7 @@ class FrontEnd(wx.Frame):
         self.current_top_ptr = 1
         self.using_settings = False
 
-	# This is the menu list. It starts out with settings as the only
+        # This is the menu list. It starts out with settings as the only
         # entry. New entries are appended after asking the backend for them
         self.menu_items_list = ['                                \nSettings\n                                ']
 
@@ -86,95 +86,96 @@ class FrontEnd(wx.Frame):
         for setting in range(8):
             self.settings_list.append('                                \nSetting {}\n                                '.format(setting))
 
-	# Center the GUI on the display
+        # Center the GUI on the display
         self.Centre()
 
-	# Load the other GUI elements
+        # Load the other GUI elements
         self.setupGUIElements()
 
         self.setupThreads()
 
-	# A dictionary so that I can dynamically use textboxes using only
-	# an index for reference.
+        # A dictionary so that I can dynamically use textboxes using only
+        # an index for reference.
         self.text_box_num_dict = {0:self.firstTextBox,
                                   1:self.secondTextBox,
                                   2:self.thirdTextBox}
 
-	# Ask the backend for a call history of 5 elements to start with
+        # Ask the backend for a call history of 5 elements to start with
         self.loadCallHistory(5)
 
     @call_rec_reader.on_message.connect
     def call_rec_handler(reader, message):
-	global CALL_REC, CALL_REC_MSG
-	CALL_REC_MSG = message.body
-	CALL_REC = True
+        global CALL_REC, CALL_REC_MSG
+        CALL_REC_MSG = message.body
+        CALL_REC = True
         print 'Got call received message: {}'.format(message.body)
 
     @hist_give_reader.on_message.connect
     def hist_give_handler(reader, message):
-	global HIST_GIVE, HIST_GIVE_MSG
-	HIST_GIVE_MSG = message.body
-	HIST_GIVE = True
-	print 'Got history give message: {}'.format(message.body)
+        global HIST_GIVE, HIST_GIVE_MSG
+        HIST_GIVE_MSG = message.body
+        HIST_GIVE = True
+        print 'Got history give message: {}'.format(message.body)
 
     @set_all_reader.on_message.connect
     def set_all_handler(reader, message):
-	global SET_ALL
-	SET_ALL = True
-	print 'Got settings all message: {}'.format(message.body)
+        global SET_ALL
+        SET_ALL = True
+        print 'Got settings all message: {}'.format(message.body)
 
     @set_give_reader.on_message.connect
     def set_give_handler(reader, message):
-	global SET_GIVE
-	SET_GIVE = True
-	print 'Got setting give message: {}'.format(message.body)        
+        global SET_GIVE
+        SET_GIVE = True
+        print 'Got setting give message: {}'.format(message.body)        
 
     def call_rec_reader_thread(self):
         call_rec_reader.start()
 
     def hist_give_reader_thread(self):
-	hist_give_reader.start()
+        hist_give_reader.start()
 
     def set_all_reader_thread(self):
-	set_all_reader.start()
+        set_all_reader.start()
 
     def set_give_reader_thread(self):
-	set_give_reader.start()
+        set_give_reader.start()
 
     def setupThreads(self):
         reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
-	reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
+        reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
+
+        t = threading.Thread(target=self.checkForMessages)
+        t.daemon = True
+        t.start()
+
         for reader_thread in reader_threads:
             t = threading.Thread(target=reader_thread)
             t.daemon = True
             t.start()
 
-	for reader_obj in reader_objs:
-	    reader_obj.join()
-
-	t = threading.Thread(target=self.checkForMessages)
-	t.daemon = True
-	t.start()
+        for reader_obj in reader_objs:
+            reader_obj.join()
 
     def checkForMessages(self):
-	global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
-	while(True):
-	    if CALL_REC:
-	        CALL_REC = False
-		msg_list = CALL_REC_MSG.split(':')
-	        self.firstTextBox.SetValue('\nIncoming Call')
-		self.secondTextBox.SetValue('\n{}'.format(msg_list[0]))
-		self.thirdTextBox.SetValue('\n{}'.format(msg_list[1]))
+        global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
+        while(True):
+            if CALL_REC:
+                CALL_REC = False
+                msg_list = CALL_REC_MSG.split(':')
+                self.firstTextBox.SetValue('\nIncoming Call')
+                self.secondTextBox.SetValue('\n{}'.format(msg_list[0]))
+                self.thirdTextBox.SetValue('\n{}'.format(msg_list[1]))
 
-	    if HIST_GIVE:
-		HIST_GIVE = False
-		msg_list = HIST_GIVE_MSG.split(':')
-		for index in range(int(msg_list[0])):
-		    entrys = msg_list[index+2].split(';')
-		    self.menu_items_list.append('{}\n{}\n{}'.format(entrys[0],entrys[1],entrys[2]))
-		self.firstTextBox.SetValue(self.menu_items_list[1])
-		self.secondTextBox.SetValue(self.menu_items_list[2])
-		self.thirdTextBox.SetValue(self.menu_items_list[3])
+            if HIST_GIVE:
+                HIST_GIVE = False
+                msg_list = HIST_GIVE_MSG.split(':')
+                for index in range(int(msg_list[0])):
+                    entrys = msg_list[index+2].split(';')
+                    self.menu_items_list.append('{}\n{}\n{}'.format(entrys[0],entrys[1],entrys[2]))
+                self.firstTextBox.SetValue(self.menu_items_list[1])
+                self.secondTextBox.SetValue(self.menu_items_list[2])
+                self.thirdTextBox.SetValue(self.menu_items_list[3])
 
     def setupGUIElements(self):
 	'''
@@ -192,8 +193,8 @@ class FrontEnd(wx.Frame):
 	    None
 	'''
 
-	# Create all three textboxes and position them with a little space
-	# between each one to accentuate each one
+        # Create all three textboxes and position them with a little space
+        # between each one to accentuate each one
         self.firstTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,0),size=(800,152))
         self.firstTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
@@ -220,7 +221,7 @@ class FrontEnd(wx.Frame):
 	    None
 
 	'''
-	# NOTE: This function loads fake values until the backend is ready to 
+        # NOTE: This function loads fake values until the backend is ready to 
         #       communicate with the frontend.
         now = datetime.now()
         ampm = 'pm' if now.hour >= 12 else 'am'
@@ -233,20 +234,21 @@ class FrontEnd(wx.Frame):
             date = datetime(2018,10,25-day,6,0,0)
             self.menu_items_list.append(date.strftime('       %m/%d/%Y %I:%M') + ' am      \nGantt Chart\n       1 (919) 555 - 1234      ')
 
-	# Load the textboxes with the first three call histories and ignore
+        # Load the textboxes with the first three call histories and ignore
         # the settings menu item at first.
         self.firstTextBox.AppendText(self.menu_items_list[1])
         self.secondTextBox.AppendText(self.menu_items_list[2])
         self.thirdTextBox.AppendText(self.menu_items_list[3])
 	
-	# Bind all 3 textboxes to go to the keyEventHandler whenever a key
+        # Bind all 3 textboxes to go to the keyEventHandler whenever a key
         # is pressed down
         self.firstTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.secondTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.thirdTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
 
-	# highlight the currently selected menu item
+        # highlight the currently selected menu item
         self.highlightBox(self.firstTextBox)
+
     def setValues(self):
 	'''
 	function:
@@ -290,7 +292,7 @@ class FrontEnd(wx.Frame):
 	    None
 	'''
 
-	# Set focus on the current text box and highlight all text
+        # Set focus on the current text box and highlight all text
         textBox.SetFocus()
         textBox.SetSelection(-1,-1)
 
@@ -312,13 +314,13 @@ class FrontEnd(wx.Frame):
                       pressed, however, this Error will be ignored.
 	'''
 	
-	# Get the event code
+        # Get the event code
         code = event.GetKeyCode()
 
-	# If the event is an up arrow key pressed...
+        # If the event is an up arrow key pressed...
         if self.key_by_ascii_dict[code] == 'up':
-	    # Only do anything if we are not at the top of the list.
-	    # Decrement the pointers based on where we are in the GUI
+            # Only do anything if we are not at the top of the list.
+            # Decrement the pointers based on where we are in the GUI
             if self.menu_ptr != 0:
                 if self.current_top_ptr == self.menu_ptr:
                     self.current_top_ptr-=1
@@ -326,24 +328,24 @@ class FrontEnd(wx.Frame):
                     self.current_selected_text_box-=1
                 self.menu_ptr-=1
 
-                # Update the values in the text boxes
-                self.setValues()
+            # Update the values in the text boxes
+            self.setValues()
 
-	# If the event is a down arrow key pressed...
+        # If the event is a down arrow key pressed...
         if self.key_by_ascii_dict[code] == 'down':
             # Get the list to use
             list_to_use = self.settings_list if self.using_settings else self.menu_items_list
-	    # Only do anything if we are not at the bottom of the list.
-	    # Increment the pointers based on where we are in the GUI
+            # Only do anything if we are not at the bottom of the list.
+            # Increment the pointers based on where we are in the GUI
             if self.menu_ptr < len(list_to_use)-1:
                 if self.menu_ptr - 2 == self.current_top_ptr:
-                    self.current_top_ptr+=1
+                       self.current_top_ptr+=1
                 if self.current_selected_text_box != 2:
                     self.current_selected_text_box+=1
                 self.menu_ptr+=1
 
-		# Update the values in the text boxes
-                self.setValues()
+            # Update the values in the text boxes
+            self.setValues()
 
         if self.key_by_ascii_dict[code] == 'enter':
             if self.menu_ptr == 0:
