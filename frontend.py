@@ -16,11 +16,8 @@ hist_give_reader = gnsq.Reader('history_give', 'frontend_lcd', '127.0.0.1:4150')
 set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
 set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
 
-global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
-CALL_REC = False
-HIST_GIVE = False
-SET_ALL = False
-SET_GIVE = False
+global CALL_INC, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
+CALL_INC = False
 CALL_REC_MSG = ''
 HIST_GIVE_MSG = ''
 SET_ALL_MSG = ''
@@ -69,6 +66,8 @@ class FrontEnd(wx.Frame):
                                   350:'f11',
                                   351:'f12'}
 
+        self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
+
         # These 3 pointers help to keep up with what to display on the GUI.
         # menu_ptr is the list index of the currently selected menu item.
         # current_selected_text_box is an integer that ranges from 0 to 2
@@ -81,6 +80,8 @@ class FrontEnd(wx.Frame):
         self.current_selected_text_box = 0
         self.current_top_ptr = 1
         self.using_settings = False
+        self.end_of_call_history = False
+        self.waiting_for_message = False
 
         # This is the menu list. It starts out with settings as the only
         # entry. New entries are appended after asking the backend for them
@@ -105,38 +106,45 @@ class FrontEnd(wx.Frame):
                                   1:self.secondTextBox,
                                   2:self.thirdTextBox}
 
-        # Ask the backend for a call history of 5 elements to start with
+        # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
-
 
     @call_rec_reader.on_message.connect
     def call_rec_handler(reader, message):
-        global CALL_REC_MSG
+        global CALL_REC_MSG, CALL_INC
         CALL_REC_MSG = message.body
-        time.sleep(3)
+        CALL_INC = True
+        time.sleep(2)
         print 'Got call received message: {}'.format(message.body)
-        pyautogui.press('f12')
-        time.sleep(5)
+        pyautogui.press('f9')
+        print 'Displaying caller info and waiting 30 sec...'
+        time.sleep(30)
+        print 'Displaying original menu again'
         pyautogui.press('f8')
 
     @hist_give_reader.on_message.connect
     def hist_give_handler(reader, message):
-        global HIST_GIVE, HIST_GIVE_MSG
+        global HIST_GIVE_MSG
         HIST_GIVE_MSG = message.body
-        HIST_GIVE = True
         print 'Got history give message: {}'.format(message.body)
+        time.sleep(2)
+        pyautogui.press('f10')
 
     @set_all_reader.on_message.connect
     def set_all_handler(reader, message):
-        global SET_ALL
-        SET_ALL = True
+        global SET_ALL_MSG
+        SET_ALL_MSG = message.body
         print 'Got settings all message: {}'.format(message.body)
+        time.sleep(2)
+        pyautogui.press('f11')
 
     @set_give_reader.on_message.connect
     def set_give_handler(reader, message):
-        global SET_GIVE
-        SET_GIVE = True
-        print 'Got setting give message: {}'.format(message.body)        
+        global SET_GIVE_MSG
+        SET_GIVE_MSG = message.body
+        print 'Got setting give message: {}'.format(message.body)
+        time.sleep(2)
+        pyautogui.press('f12')
 
     def call_rec_reader_thread(self):
         call_rec_reader.start()
@@ -154,10 +162,6 @@ class FrontEnd(wx.Frame):
         reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
         reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
 
-        #t = Thread(target=self.checkForMessages)
-        #t.daemon = True
-        #t.start()
-
         for reader_thread in reader_threads:
             t = Thread(target=reader_thread)
             t.daemon = True
@@ -166,18 +170,11 @@ class FrontEnd(wx.Frame):
         for reader_obj in reader_objs:
             reader_obj.join()
 
-    def checkForMessages(self):
-        global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
-        while(True):
-            if HIST_GIVE:
-                HIST_GIVE = False
-                msg_list = HIST_GIVE_MSG.split(':')
-                for index in range(int(msg_list[0])):
-                    entrys = msg_list[index+2].split(';')
-                    self.menu_items_list.append('{}\n{}\n{}'.format(entrys[0],entrys[1],entrys[2]))
-                self.firstTextBox.SetValue(self.menu_items_list[1])
-                self.secondTextBox.SetValue(self.menu_items_list[2])
-                self.thirdTextBox.SetValue(self.menu_items_list[3])
+    def sendMessage(self, topic, message, wait):
+        if wait:
+            self.waiting_for_message = True
+        print 'Sending message:{} to topic:{}'.format(message,topic)
+        self.conn.publish(topic,message)
 
     def setupGUIElements(self):
         # Create all three textboxes and position them with a little space
@@ -192,8 +189,16 @@ class FrontEnd(wx.Frame):
         self.thirdTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
     def loadCallHistory(self, num_entries=5): 
-        # Load the textboxes with the first three call histories and ignore
-        # the settings menu item at first.
+        global CALL_INC
+        CALL_INC = False
+        self.menu_items_list = ['                                \nSettings\n                                ']
+        self.menu_ptr = 1
+        self.current_selected_text_box = 0
+        self.current_top_ptr = 1
+        self.using_settings = False
+        self.end_of_call_history = False
+        self.sendMessage('history_get','10:0',False)
+
         self.firstTextBox.SetValue(self.menu_items_list[1])
         self.secondTextBox.SetValue(self.menu_items_list[2])
         self.thirdTextBox.SetValue(self.menu_items_list[3])
@@ -201,15 +206,15 @@ class FrontEnd(wx.Frame):
         # highlight the currently selected menu item
         self.highlightBox(self.firstTextBox)
 
-    def setupCallHistory(self, num_entries=5):
+    def setupCallHistory(self):
 	'''
 	function:
-	    loadCallHistory: function to request the call history from the backend
-                             and dipslay them on the screen.
+	    setupCallHistory: function to request the call history from the backend
+                         and dipslay them on the screen.
 
 	args:
 	    num_calls: the number of calls to request from the backend. Default
-                       is 5
+                   is 5
 
 	returns:
 	    None
@@ -218,33 +223,13 @@ class FrontEnd(wx.Frame):
 	    None
 
 	'''
-        # NOTE: This function loads fake values until the backend is ready to 
-        #       communicate with the frontend.
-        now = datetime.now()
-        ampm = 'pm' if now.hour >= 12 else 'am'
-        self.menu_items_list.append(now.strftime('       %m/%d/%Y %I:%M ') + ampm + '      \nDavid Greeson\n       1 (336) 555 - 1234      ')
-        for hour in range(23):
-            date = datetime(2018,10,25,23-hour,0,0)
-            ampm = 'pm' if date.hour >= 12 else 'am'
-            self.menu_items_list.append(date.strftime('       %m/%d/%Y %I:%M ') + ampm +  '      \nGantt Chart\n       1 (919) 555 - 1234      ')
-        for day in range(23):
-            date = datetime(2018,10,25-day,6,0,0)
-            self.menu_items_list.append(date.strftime('       %m/%d/%Y %I:%M') + ' am      \nGantt Chart\n       1 (919) 555 - 1234      ')
-
-        # Load the textboxes with the first three call histories and ignore
-        # the settings menu item at first.
-        self.firstTextBox.SetValue(self.menu_items_list[1])
-        self.secondTextBox.SetValue(self.menu_items_list[2])
-        self.thirdTextBox.SetValue(self.menu_items_list[3])
+        self.sendMessage('history_get','10:0',True)
 	
         # Bind all 3 textboxes to go to the keyEventHandler whenever a key
         # is pressed down
         self.firstTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.secondTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.thirdTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
-
-        # highlight the currently selected menu item
-        self.highlightBox(self.firstTextBox)
 
     def setValues(self):
 	'''
@@ -293,6 +278,21 @@ class FrontEnd(wx.Frame):
         textBox.SetFocus()
         textBox.SetSelection(-1,-1)
 
+    def formatMenuItem(self, number, name, time):
+        number = '        {} ({}) {} - {}      '.format(number[:1],number[1:4],number[4:7],number[-4:])
+        num_pad_spaces = int((32 - len(name))/2)
+        space = ''
+        for _ in range(num_pad_spaces):
+            space = space + ' '
+        name = '{}{}{}'.format(space,name,space)
+        num_pad_spaces = int((32 - len(time))/2)
+        space = ''
+        for _ in range(num_pad_spaces):
+            space = space + ' '
+        time = '{}{}{}'.format(space,time,space)
+        return '{}\n{}\n{}'.format(number,name,time)
+        
+
     def keyEventHandler(self, event):
 	'''
 	function:
@@ -311,42 +311,49 @@ class FrontEnd(wx.Frame):
                       pressed, however, this Error will be ignored.
 	'''
 	
-        global CALL_REC, CALL_REC_MSG
+        global CALL_INC, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
         # Get the event code
         code = event.GetKeyCode()
 
         # If the event is an up arrow key pressed...
         if self.key_by_ascii_dict[code] == 'up':
-            # Only do anything if we are not at the top of the list.
-            # Decrement the pointers based on where we are in the GUI
-            if self.menu_ptr != 0:
-                if self.current_top_ptr == self.menu_ptr:
-                    self.current_top_ptr-=1
-                if self.current_selected_text_box != 0:
-                    self.current_selected_text_box-=1
-                self.menu_ptr-=1
+            if not CALL_INC:
+                # Only do anything if we are not at the top of the list.
+                # Decrement the pointers based on where we are in the GUI
+                if self.menu_ptr != 0:
+                    if self.current_top_ptr == self.menu_ptr:
+                        self.current_top_ptr-=1
+                    if self.current_selected_text_box != 0:
+                        self.current_selected_text_box-=1
+                    self.menu_ptr-=1
 
-            # Update the values in the text boxes
-            self.setValues()
+                # Update the values in the text boxes
+                self.setValues()
 
         # If the event is a down arrow key pressed...
         if self.key_by_ascii_dict[code] == 'down':
-            # Get the list to use
-            list_to_use = self.settings_list if self.using_settings else self.menu_items_list
-            # Only do anything if we are not at the bottom of the list.
-            # Increment the pointers based on where we are in the GUI
-            if self.menu_ptr < len(list_to_use)-1:
-                if self.menu_ptr - 2 == self.current_top_ptr:
-                       self.current_top_ptr+=1
-                if self.current_selected_text_box != 2:
-                    self.current_selected_text_box+=1
-                self.menu_ptr+=1
+            if not CALL_INC:
+                # Get the list to use
+                list_to_use = self.settings_list if self.using_settings else self.menu_items_list
+                # Only do anything if we are not at the bottom of the list.
+                # Increment the pointers based on where we are in the GUI
+                if self.menu_ptr < len(list_to_use)-1:
+                    if self.menu_ptr - 2 == self.current_top_ptr:
+                        self.current_top_ptr+=1
+                    if self.current_selected_text_box != 2:
+                        self.current_selected_text_box+=1
+                    self.menu_ptr+=1
+                elif not self.end_of_call_history and not self.waiting_for_message:
+                    self.sendMessage('history_get','10:{}'.format(len(self.menu_items_list)-1),True)
 
-            # Update the values in the text boxes
-            self.setValues()
+                # Update the values in the text boxes
+                self.setValues()
 
         if self.key_by_ascii_dict[code] == 'enter':
-            if self.menu_ptr == 0:
+            if CALL_INC:
+                self.sendMessage('call_blacklist',CALL_REC_MSG,False)
+                self.thirdTextBox.SetValue('Caller Has Been Blocked!')
+            elif self.menu_ptr == 0:
                 self.using_settings = True
                 self.menu_ptr = 0
                 self.current_selected_text_box = 0
@@ -364,11 +371,29 @@ class FrontEnd(wx.Frame):
         if self.key_by_ascii_dict[code] == 'f8':
             self.loadCallHistory()
 
-        if self.key_by_ascii_dict[code] == 'f12':
+        if self.key_by_ascii_dict[code] == 'f9':
             msg_list = CALL_REC_MSG.split(':')
             self.firstTextBox.SetValue('\nIncoming Call From')
             self.secondTextBox.SetValue('{}\n{}'.format(msg_list[0],msg_list[1]))
             self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
+
+        if self.key_by_ascii_dict[code] == 'f10':
+            msg_list = HIST_GIVE_MSG.split(':')
+            if msg_list[0] == '0':
+                self.end_of_call_history = True
+                self.menu_items_list.append('                                \nEnd of Call History\n                                ')
+            else:
+                for item in range(2,int(msg_list[0])+2):
+                    sub_msg_list = msg_list[item].split(';')
+                    self.menu_items_list.append(self.formatMenuItem(sub_msg_list[0],sub_msg_list[1],sub_msg_list[2]))
+            self.waiting_for_message = False
+            self.setValues()
+
+        if self.key_by_ascii_dict[code] == 'f11':
+            print 'got the f11'
+
+        if self.key_by_ascii_dict[code] == 'f12':
+            print 'got the f12'
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
