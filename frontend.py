@@ -7,7 +7,8 @@
  Last Modified: 11/08/2018
 '''
 
-import wx, gnsq, threading
+import wx, gnsq, time, pyautogui
+from threading import Thread
 from datetime import datetime
 
 call_rec_reader = gnsq.Reader('call_received', 'frontend_lcd', '127.0.0.1:4150')
@@ -30,7 +31,6 @@ class FrontEnd(wx.Frame):
     FrontEnd class which contains the GUI and all of the elements involved in
     communicating between the user and the backend
     '''
-
     def __init__(self, parent, title):
         '''
         function:
@@ -62,7 +62,12 @@ class FrontEnd(wx.Frame):
                                   317:'down',
                                   13 :'enter',
                                   8  :'backspace',
-                                  307:'alt'}
+                                  307:'alt',
+                                  347:'f8',
+                                  348:'f9',
+                                  349:'f10',
+                                  350:'f11',
+                                  351:'f12'}
 
         # These 3 pointers help to keep up with what to display on the GUI.
         # menu_ptr is the list index of the currently selected menu item.
@@ -101,14 +106,18 @@ class FrontEnd(wx.Frame):
                                   2:self.thirdTextBox}
 
         # Ask the backend for a call history of 5 elements to start with
-        self.loadCallHistory(5)
+        self.setupCallHistory()
+
 
     @call_rec_reader.on_message.connect
     def call_rec_handler(reader, message):
-        global CALL_REC, CALL_REC_MSG
+        global CALL_REC_MSG
         CALL_REC_MSG = message.body
-        CALL_REC = True
+        time.sleep(3)
         print 'Got call received message: {}'.format(message.body)
+        pyautogui.press('f12')
+        time.sleep(5)
+        pyautogui.press('f8')
 
     @hist_give_reader.on_message.connect
     def hist_give_handler(reader, message):
@@ -145,12 +154,12 @@ class FrontEnd(wx.Frame):
         reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
         reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
 
-        t = threading.Thread(target=self.checkForMessages)
-        t.daemon = True
-        t.start()
+        #t = Thread(target=self.checkForMessages)
+        #t.daemon = True
+        #t.start()
 
         for reader_thread in reader_threads:
-            t = threading.Thread(target=reader_thread)
+            t = Thread(target=reader_thread)
             t.daemon = True
             t.start()
 
@@ -160,13 +169,6 @@ class FrontEnd(wx.Frame):
     def checkForMessages(self):
         global CALL_REC, HIST_GIVE, SET_ALL, SET_GIVE, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
         while(True):
-            if CALL_REC:
-                CALL_REC = False
-                msg_list = CALL_REC_MSG.split(':')
-                self.firstTextBox.SetValue('\nIncoming Call')
-                self.secondTextBox.SetValue('\n{}'.format(msg_list[0]))
-                self.thirdTextBox.SetValue('\n{}'.format(msg_list[1]))
-
             if HIST_GIVE:
                 HIST_GIVE = False
                 msg_list = HIST_GIVE_MSG.split(':')
@@ -178,21 +180,6 @@ class FrontEnd(wx.Frame):
                 self.thirdTextBox.SetValue(self.menu_items_list[3])
 
     def setupGUIElements(self):
-	'''
-	function:
-	    setupGUIElements: function to create the rest of the necessary GUI
-                              elements for displaying on the main window
-
-	args:
-	    None
-
-	returns:
-	    None
-
-	raises:
-	    None
-	'''
-
         # Create all three textboxes and position them with a little space
         # between each one to accentuate each one
         self.firstTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,0),size=(800,152))
@@ -204,7 +191,17 @@ class FrontEnd(wx.Frame):
         self.thirdTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,310),size=(800,170))
         self.thirdTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
-    def loadCallHistory(self, num_entries=5):
+    def loadCallHistory(self, num_entries=5): 
+        # Load the textboxes with the first three call histories and ignore
+        # the settings menu item at first.
+        self.firstTextBox.SetValue(self.menu_items_list[1])
+        self.secondTextBox.SetValue(self.menu_items_list[2])
+        self.thirdTextBox.SetValue(self.menu_items_list[3])
+	
+        # highlight the currently selected menu item
+        self.highlightBox(self.firstTextBox)
+
+    def setupCallHistory(self, num_entries=5):
 	'''
 	function:
 	    loadCallHistory: function to request the call history from the backend
@@ -236,9 +233,9 @@ class FrontEnd(wx.Frame):
 
         # Load the textboxes with the first three call histories and ignore
         # the settings menu item at first.
-        self.firstTextBox.AppendText(self.menu_items_list[1])
-        self.secondTextBox.AppendText(self.menu_items_list[2])
-        self.thirdTextBox.AppendText(self.menu_items_list[3])
+        self.firstTextBox.SetValue(self.menu_items_list[1])
+        self.secondTextBox.SetValue(self.menu_items_list[2])
+        self.thirdTextBox.SetValue(self.menu_items_list[3])
 	
         # Bind all 3 textboxes to go to the keyEventHandler whenever a key
         # is pressed down
@@ -314,6 +311,7 @@ class FrontEnd(wx.Frame):
                       pressed, however, this Error will be ignored.
 	'''
 	
+        global CALL_REC, CALL_REC_MSG
         # Get the event code
         code = event.GetKeyCode()
 
@@ -362,6 +360,15 @@ class FrontEnd(wx.Frame):
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 1
                 self.setValues()
+
+        if self.key_by_ascii_dict[code] == 'f8':
+            self.loadCallHistory()
+
+        if self.key_by_ascii_dict[code] == 'f12':
+            msg_list = CALL_REC_MSG.split(':')
+            self.firstTextBox.SetValue('\nIncoming Call From')
+            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[0],msg_list[1]))
+            self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
