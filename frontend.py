@@ -31,7 +31,7 @@ class FrontEnd(wx.Frame):
     def __init__(self, parent, title):
         '''
         function:
-            __init__: constructor for the FrontEnd calss. It calls the super()
+            __init__: constructor for the FrontEnd class. It calls the super()
                       constructor to build the GUI window, creates andn places
                       the rest of the GUI elements, declares class variables
                       to be used throughout this GUI, and loads the call history
@@ -87,10 +87,8 @@ class FrontEnd(wx.Frame):
         # entry. New entries are appended after asking the backend for them
         self.menu_items_list = ['                                \nSettings\n                                ']
 
-        # THis is the settings list. It has generic settings right now
+        # This is the settings list. It has generic settings right now
         self.settings_list = []
-        for setting in range(8):
-            self.settings_list.append('                                \nSetting {}\n                                '.format(setting))
 
         # Center the GUI on the display
         self.Centre()
@@ -105,6 +103,8 @@ class FrontEnd(wx.Frame):
         self.text_box_num_dict = {0:self.firstTextBox,
                                   1:self.secondTextBox,
                                   2:self.thirdTextBox}
+
+        self.firstTextBox.SetValue('Loading Call History...')
 
         # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
@@ -166,9 +166,11 @@ class FrontEnd(wx.Frame):
             t = Thread(target=reader_thread)
             t.daemon = True
             t.start()
-
-        for reader_obj in reader_objs:
-            reader_obj.join()
+        try:
+            for reader_obj in reader_objs:
+                reader_obj.join()
+        except:
+            print '<Warning> Could not join threads'
 
     def sendMessage(self, topic, message, wait):
         if wait:
@@ -358,7 +360,10 @@ class FrontEnd(wx.Frame):
                 self.menu_ptr = 0
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
-                self.setValues()
+                self.firstTextBox.SetValue('Loading Current Settings...')
+                self.secondTextBox.SetValue('')
+                self.thirdTextBox.SetValue('')
+                self.sendMessage('settings_request_all', 'no', True)
 
         if self.key_by_ascii_dict[code] == 'backspace':
             if self.using_settings:
@@ -369,12 +374,16 @@ class FrontEnd(wx.Frame):
                 self.setValues()
 
         if self.key_by_ascii_dict[code] == 'f8':
+            self.firstTextBox.SetValue('Loading Call History...')
+            self.secondTextBox.SetValue('')
+            self.thirdTextBox.SetValue('')
             self.loadCallHistory()
 
         if self.key_by_ascii_dict[code] == 'f9':
             msg_list = CALL_REC_MSG.split(':')
+            num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4])
             self.firstTextBox.SetValue('\nIncoming Call From')
-            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[0],msg_list[1]))
+            self.secondTextBox.SetValue('{}\n{}'.format(num,msg_list[1]))
             self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
 
         if self.key_by_ascii_dict[code] == 'f10':
@@ -390,7 +399,13 @@ class FrontEnd(wx.Frame):
             self.setValues()
 
         if self.key_by_ascii_dict[code] == 'f11':
-            print 'got the f11'
+            msg_list = SET_ALL_MSG.split(':')
+            self.settings_list = []
+            for setting in msg_list:
+                self.settings_list.append('                                \n{}\n                                '.format(setting))
+            self.settings_list.append('                                \nEnd of Settings\n                                ')
+            self.waiting_for_message = False
+            self.setValues()
 
         if self.key_by_ascii_dict[code] == 'f12':
             print 'got the f12'
