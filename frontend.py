@@ -381,9 +381,9 @@ class FrontEnd(wx.Frame):
 
         if self.key_by_ascii_dict[code] == 'f9':
             msg_list = CALL_REC_MSG.split(':')
-            num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4])
+            num = '{} ({}) {} - {}'.format(msg_list[1][:1],msg_list[1][1:4],msg_list[1][4:7],msg_list[1][-4:])
             self.firstTextBox.SetValue('\nIncoming Call From')
-            self.secondTextBox.SetValue('{}\n{}'.format(num,msg_list[1]))
+            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[0],num))
             self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
 
         if self.key_by_ascii_dict[code] == 'f10':
