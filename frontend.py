@@ -79,9 +79,14 @@ class FrontEnd(wx.Frame):
         self.menu_ptr = 1
         self.current_selected_text_box = 0
         self.current_top_ptr = 1
+        self.end_of_settings_ptr = 1
         self.using_settings = False
         self.end_of_call_history = False
         self.waiting_for_message = False
+        self.selecting_setting = False
+        self.state_name = ''
+
+        self.line_space = 32*' '
 
         # This is the menu list. It starts out with settings as the only
         # entry. New entries are appended after asking the backend for them
@@ -89,6 +94,8 @@ class FrontEnd(wx.Frame):
 
         # This is the settings list. It has generic settings right now
         self.settings_list = []
+
+        self.setting_state_list = []
 
         # Center the GUI on the display
         self.Centre()
@@ -104,7 +111,7 @@ class FrontEnd(wx.Frame):
                                   1:self.secondTextBox,
                                   2:self.thirdTextBox}
 
-        self.firstTextBox.SetValue('Loading Call History...')
+        self.firstTextBox.SetValue('\nLoading Call History...')
 
         # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
@@ -181,19 +188,19 @@ class FrontEnd(wx.Frame):
     def setupGUIElements(self):
         # Create all three textboxes and position them with a little space
         # between each one to accentuate each one
-        self.firstTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,0),size=(800,152))
+        self.firstTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,0),size=(800,152))
         self.firstTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
-        self.secondTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,155),size=(800,152))
+        self.secondTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,155),size=(800,152))
         self.secondTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
-        self.thirdTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE,pos=(0,310),size=(800,170))
+        self.thirdTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,310),size=(800,170))
         self.thirdTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
     def loadCallHistory(self, num_entries=5): 
         global CALL_INC
         CALL_INC = False
-        self.menu_items_list = ['                                \nSettings\n                                ']
+        self.menu_items_list = ['{}\nSettings\n{}'.format(self.line_space,self.line_space)]
         self.menu_ptr = 1
         self.current_selected_text_box = 0
         self.current_top_ptr = 1
@@ -250,7 +257,7 @@ class FrontEnd(wx.Frame):
 	    None
 	'''
         
-        list_to_use = self.settings_list if self.using_settings else self.menu_items_list
+        list_to_use = self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
 
         # Load the menu items based on what the current_top_ptr is pointing to
         self.firstTextBox.SetValue(list_to_use[self.current_top_ptr])
@@ -319,7 +326,7 @@ class FrontEnd(wx.Frame):
 
         # If the event is an up arrow key pressed...
         if self.key_by_ascii_dict[code] == 'up':
-            if not CALL_INC:
+            if not CALL_INC and not self.waiting_for_message:
                 # Only do anything if we are not at the top of the list.
                 # Decrement the pointers based on where we are in the GUI
                 if self.menu_ptr != 0:
@@ -334,9 +341,9 @@ class FrontEnd(wx.Frame):
 
         # If the event is a down arrow key pressed...
         if self.key_by_ascii_dict[code] == 'down':
-            if not CALL_INC:
+            if not CALL_INC and not self.waiting_for_message:
                 # Get the list to use
-                list_to_use = self.settings_list if self.using_settings else self.menu_items_list
+                list_to_use = self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
                 # Only do anything if we are not at the bottom of the list.
                 # Increment the pointers based on where we are in the GUI
                 if self.menu_ptr < len(list_to_use)-1:
@@ -345,7 +352,7 @@ class FrontEnd(wx.Frame):
                     if self.current_selected_text_box != 2:
                         self.current_selected_text_box+=1
                     self.menu_ptr+=1
-                elif not self.end_of_call_history and not self.waiting_for_message:
+                elif not self.end_of_call_history and not self.waiting_for_message and not self.using_settings:
                     self.sendMessage('history_get','10:{}'.format(len(self.menu_items_list)-1),True)
 
                 # Update the values in the text boxes
@@ -355,26 +362,58 @@ class FrontEnd(wx.Frame):
             if CALL_INC:
                 self.sendMessage('call_blacklist',CALL_REC_MSG,False)
                 self.thirdTextBox.SetValue('Caller Has Been Blocked!')
-            elif self.menu_ptr == 0:
+            elif self.menu_ptr == 0 and not self.using_settings:
                 self.using_settings = True
                 self.menu_ptr = 0
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
-                self.firstTextBox.SetValue('Loading Current Settings...')
+                self.end_of_settings_ptr = 1
+                self.firstTextBox.SetValue('\nLoading Current Settings...')
                 self.secondTextBox.SetValue('')
                 self.thirdTextBox.SetValue('')
                 self.sendMessage('settings_request_all', 'no', True)
+            elif self.selecting_setting:
+                if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
+                    self.selecting_setting = False
+                    self.sendMessage('setting_set', '{}:{}'.format(self.state_name,self.setting_state_list[self.menu_ptr].strip()), False)
+                    self.menu_ptr = 0
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 0
+                    self.firstTextBox.SetValue(self.settings_list[self.menu_ptr])
+                    self.secondTextBox.SetValue(self.settings_list[self.menu_ptr+1])
+                    self.thirdTextBox.SetValue(self.settings_list[self.menu_ptr+2])
+                    self.highlightBox(self.firstTextBox)
+            elif self.using_settings:
+                if self.settings_list[self.menu_ptr].strip() != 'End of Settings':
+                    self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
+                    self.selecting_setting = True
+                    self.menu_ptr = 1
+                    self.current_selected_text_box = 1
+                    self.current_top_ptr = 0
+                    self.firstTextBox.SetValue('\nLoading Selected Setting...')
+                    self.secondTextBox.SetValue('')
+                    self.thirdTextBox.SetValue('')
 
         if self.key_by_ascii_dict[code] == 'backspace':
-            if self.using_settings:
-                self.using_settings = False
-                self.menu_ptr = 1
-                self.current_selected_text_box = 0
-                self.current_top_ptr = 1
-                self.setValues()
+            if not CALL_INC and not self.waiting_for_message:
+                if self.selecting_setting:
+                    self.menu_ptr = 0
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 0
+                    self.selecting_setting = False
+                    self.firstTextBox.SetValue(self.settings_list[0])
+                    self.secondTextBox.SetValue(self.settings_list[1])
+                    self.thirdTextBox.SetValue(self.settings_list[2])
+                    self.highlightBox(self.firstTextBox)
+                elif self.using_settings:
+                    self.using_settings = False
+                    self.menu_ptr = 1
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 1
+                    self.setValues()
 
         if self.key_by_ascii_dict[code] == 'f8':
-            self.firstTextBox.SetValue('Loading Call History...')
+            self.firstTextBox.SetValue('\nLoading Call History...')
             self.secondTextBox.SetValue('')
             self.thirdTextBox.SetValue('')
             self.loadCallHistory()
@@ -390,7 +429,7 @@ class FrontEnd(wx.Frame):
             msg_list = HIST_GIVE_MSG.split(':')
             if msg_list[0] == '0':
                 self.end_of_call_history = True
-                self.menu_items_list.append('                                \nEnd of Call History\n                                ')
+                self.menu_items_list.append('{}\nEnd of Call History\n{}'.format(self.line_space,self.line_space))
             else:
                 for item in range(2,int(msg_list[0])+2):
                     sub_msg_list = msg_list[item].split(';')
@@ -402,13 +441,25 @@ class FrontEnd(wx.Frame):
             msg_list = SET_ALL_MSG.split(':')
             self.settings_list = []
             for setting in msg_list:
-                self.settings_list.append('                                \n{}\n                                '.format(setting))
-            self.settings_list.append('                                \nEnd of Settings\n                                ')
+                self.settings_list.append('{}\n{}\n{}'.format(self.line_space,setting,self.line_space))
+                self.end_of_settings_ptr += 1
+            self.settings_list.append('{}\nEnd of Settings\n{}'.format(self.line_space,self.line_space))
             self.waiting_for_message = False
             self.setValues()
 
         if self.key_by_ascii_dict[code] == 'f12':
-            print 'got the f12'
+            msg_list = SET_GIVE_MSG.split(':')
+            self.state_name = msg_list[0]
+            self.setting_state_list = []
+            name_pad_space = int((32 - len(msg_list[0]))/2)
+            help_pad_space = int((32 - len(msg_list[1]))/2)
+            self.setting_state_list.append('{}{}{}\nCurrently: {}\n{}{}{}'.format(name_pad_space*' ',msg_list[0],name_pad_space*' ',msg_list[2],help_pad_space*' ',msg_list[1],help_pad_space*' '))
+            states_list = msg_list[3].split(';')
+            for state in states_list:
+                self.setting_state_list.append('{}\n{}\n{}'.format(self.line_space,state,self.line_space))
+            self.setting_state_list.append('{}\nEnd of List\n{}'.format(self.line_space,self.line_space))
+            self.waiting_for_message = False
+            self.setValues()
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
