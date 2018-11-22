@@ -144,7 +144,6 @@ class FrontEnd(wx.Frame):
         global CALL_REC_MSG, CALL_INC
         CALL_REC_MSG = message.body
         CALL_INC = True
-        time.sleep(2)
         print 'Got call received message: {}'.format(message.body)
         pyautogui.press('f9')
         print 'Displaying caller info and waiting 30 sec...'
@@ -405,9 +404,9 @@ class FrontEnd(wx.Frame):
         self.sendMessage('history_get','10:0',False)
 
         # Load the entries into the text boxes
-        self.firstTextBox.SetValue(self.menu_items_list[1])
-        self.secondTextBox.SetValue(self.menu_items_list[2])
-        self.thirdTextBox.SetValue(self.menu_items_list[3])
+        #self.firstTextBox.SetValue(self.menu_items_list[1])
+        #self.secondTextBox.SetValue(self.menu_items_list[2])
+        #self.thirdTextBox.SetValue(self.menu_items_list[3])
 	
         # highlight the currently selected menu item
         self.highlightBox(self.firstTextBox)
@@ -586,7 +585,7 @@ class FrontEnd(wx.Frame):
             if CALL_INC:
                 # Blacklist the incoming call and let the user know they blacklisted it
                 self.sendMessage('call_blacklist',CALL_REC_MSG,False)
-                self.thirdTextBox.SetValue('Caller Has Been Blocked!')
+                self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
             # Otherwise, if the user selected "Settings"...
             elif self.menu_ptr == 0 and not self.using_settings:
                 # Reset the pointers and request the settings
@@ -658,6 +657,8 @@ class FrontEnd(wx.Frame):
 
         # F8 is an internal press that means return call history back to normal...
         if self.key_by_ascii_dict[code] == 'f8':
+            self.selecting_setting = False
+            self.using_settings = False
             self.firstTextBox.SetValue('\nLoading Call History...')
             self.secondTextBox.SetValue('')
             self.thirdTextBox.SetValue('')
