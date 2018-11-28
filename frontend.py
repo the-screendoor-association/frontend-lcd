@@ -402,11 +402,6 @@ class FrontEnd(wx.Frame):
         self.using_settings = False
         self.end_of_call_history = False
         self.sendMessage('history_get','10:0',False)
-
-        # Load the entries into the text boxes
-        #self.firstTextBox.SetValue(self.menu_items_list[1])
-        #self.secondTextBox.SetValue(self.menu_items_list[2])
-        #self.thirdTextBox.SetValue(self.menu_items_list[3])
 	
         # highlight the currently selected menu item
         self.highlightBox(self.firstTextBox)
@@ -451,7 +446,6 @@ class FrontEnd(wx.Frame):
 	raises:
 	    None
 	'''
-
         # Pick the list to use so that we can update the correct values        
         list_to_use = self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
 
@@ -677,6 +671,17 @@ class FrontEnd(wx.Frame):
         if self.key_by_ascii_dict[code] == 'f10':
             # Make a list of all elements
             msg_list = HIST_GIVE_MSG.split(':')
+            # If we receive an unrequested message history...
+            if msg_list[1] == '0' and not msg_list[0] == '0':
+                # Reset the menu pointers and reload the history
+                self.menu_items_list = ['{}\nSettings\n{}'.format(self.line_space,self.line_space)]
+                self.menu_ptr = 1
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 1
+                self.using_settings = False
+                self.selecting_setting = False
+                self.end_of_call_history = False
+            
             # If the backend says there's no more history...
             if msg_list[0] == '0':
                 # Display "End of Call History" as the last element
