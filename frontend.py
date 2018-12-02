@@ -57,11 +57,11 @@ class FrontEnd(wx.Frame):
         # The key_by_ascii_dict is used to convert ascii characters into
         # easier to understand buttons on the keyboard
         self.key_by_ascii_dict = {314:'left',
-                                  315:'up',
+                                  377:'up',
                                   316:'right',
-                                  317:'down',
-                                  13 :'enter',
-                                  8  :'backspace',
+                                  379:'down',
+                                  370:'enter',
+                                  390:'backspace',
                                   307:'alt',
                                   347:'f8',
                                   348:'f9',
