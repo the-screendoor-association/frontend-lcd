@@ -504,8 +504,12 @@ class FrontEnd(wx.Frame):
         name = '{}{}{}'.format(num_pad_spaces*' ',name,num_pad_spaces*' ')
 
         # Get the number of spaces to pad and format the date
-        num_pad_spaces = int((32 - len(time))/2)
-        time = '{}{}{}'.format(num_pad_spaces*' ',time,num_pad_spaces*' ')
+        # date is received like: 20181125T1656
+        dateObj = datetime.strptime(time, "%Y%m%dT%H%M")
+        dateStr = dateObj.strftime("%m/%d/%Y %I:%M %p")
+        
+        num_pad_spaces = int((32 - len(dateStr))/2)
+        time = '{}{}{}'.format(num_pad_spaces*' ',dateStr,num_pad_spaces*' ')
 
         # Return the reformatted string
         return '{}\n{}\n{}'.format(number,name,time)
