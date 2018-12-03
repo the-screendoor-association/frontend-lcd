@@ -7,7 +7,7 @@
  Last Modified: 11/08/2018
 '''
 
-import wx, gnsq, time, pyautogui
+import wx, gnsq, time, pyautogui, string
 from threading import Thread
 from datetime import datetime
 
@@ -627,6 +627,18 @@ class FrontEnd(wx.Frame):
                     self.firstTextBox.SetValue('\nLoading Selected Setting...')
                     self.secondTextBox.SetValue('')
                     self.thirdTextBox.SetValue('')
+            
+            # else we are blacklisting a call from the history
+            else:
+                menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
+                # ripped from https://stackoverflow.com/a/1451407
+                all = string.maketrans('', '')
+                nodigs = all.translate(all, string.digits)
+                numToBlacklist = menuStr.translate(all, nodigs) + ':no'
+                self.sendMessage('call_blacklist', numToBlacklist, False)
+                self.menu_items_list[self.menu_ptr] = '\nCaller blacklisted!'
+                self.setValues()
+                
 
         # If the user hits backspace (or cancel)
         if self.key_by_ascii_dict[code] == 'backspace':
