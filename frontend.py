@@ -662,9 +662,9 @@ class FrontEnd(wx.Frame):
         if self.key_by_ascii_dict[code] == 'f9':
             # Get the incoming call info, format it, and display it on the screen
             msg_list = CALL_REC_MSG.split(':')
-            num = '{} ({}) {} - {}'.format(msg_list[1][:1],msg_list[1][1:4],msg_list[1][4:7],msg_list[1][-4:])
+            num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4:])
             self.firstTextBox.SetValue('\nIncoming Call From')
-            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[0],num))
+            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[1],num))
             self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
 
         # F10 is an internal press that means we received more call history...
