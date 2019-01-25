@@ -665,7 +665,7 @@ class FrontEnd(wx.Frame):
             num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4:])
             self.firstTextBox.SetValue('\nIncoming Call From')
             self.secondTextBox.SetValue('{}\n{}'.format(msg_list[1],num))
-            self.thirdTextBox.SetValue(u'Press the \u2713 button to block this caller!')
+            self.thirdTextBox.SetValue(u'Press the "Select" button to block this caller!')
 
         # F10 is an internal press that means we received more call history...
         if self.key_by_ascii_dict[code] == 'f10':
