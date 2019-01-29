@@ -57,11 +57,11 @@ class FrontEnd(wx.Frame):
         # The key_by_ascii_dict is used to convert ascii characters into
         # easier to understand buttons on the keyboard
         self.key_by_ascii_dict = {314:'left',
-                                  377:'up',
+                                  315:'up',
                                   316:'right',
-                                  379:'down',
-                                  370:'enter',
-                                  390:'backspace',
+                                  317:'down',
+                                  13:'enter',
+                                  8:'backspace',
                                   307:'alt',
                                   347:'f8',
                                   348:'f9',
@@ -631,12 +631,14 @@ class FrontEnd(wx.Frame):
             # else we are blacklisting a call from the history
             else:
                 menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
+                nameStr = self.menu_items_list[self.menu_ptr].split('\n')[1]
+
                 # ripped from https://stackoverflow.com/a/1451407
                 all = string.maketrans('', '')
                 nodigs = all.translate(all, string.digits)
-                numToBlacklist = menuStr.translate(all, nodigs) + ':no'
+                numToBlacklist = menuStr.translate(all, nodigs) + ':' + nameStr.replace(' ','')
                 self.sendMessage('call_blacklist', numToBlacklist, False)
-                self.menu_items_list[self.menu_ptr] = '\nCaller blacklisted!'
+                self.menu_items_list[self.menu_ptr] = '{}\nCaller blacklisted!\n{}'.format(self.line_space, self.line_space)
                 self.setValues()
                 
 
