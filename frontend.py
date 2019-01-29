@@ -7,7 +7,7 @@
  Last Modified: 11/08/2018
 '''
 
-import wx, gnsq, time, pyautogui
+import wx, gnsq, time, pyautogui, string
 from threading import Thread
 from datetime import datetime
 
@@ -57,11 +57,11 @@ class FrontEnd(wx.Frame):
         # The key_by_ascii_dict is used to convert ascii characters into
         # easier to understand buttons on the keyboard
         self.key_by_ascii_dict = {314:'left',
-                                  315:'up',
+                                  377:'up',
                                   316:'right',
-                                  317:'down',
-                                  13 :'enter',
-                                  8  :'backspace',
+                                  379:'down',
+                                  370:'enter',
+                                  390:'backspace',
                                   307:'alt',
                                   347:'f8',
                                   348:'f9',
@@ -504,8 +504,12 @@ class FrontEnd(wx.Frame):
         name = '{}{}{}'.format(num_pad_spaces*' ',name,num_pad_spaces*' ')
 
         # Get the number of spaces to pad and format the date
-        num_pad_spaces = int((32 - len(time))/2)
-        time = '{}{}{}'.format(num_pad_spaces*' ',time,num_pad_spaces*' ')
+        # date is received like: 20181125T1656
+        dateObj = datetime.strptime(time, "%Y%m%dT%H%M")
+        dateStr = dateObj.strftime("%m/%d/%Y %I:%M %p")
+        
+        num_pad_spaces = int((32 - len(dateStr))/2)
+        time = '{}{}{}'.format(num_pad_spaces*' ',dateStr,num_pad_spaces*' ')
 
         # Return the reformatted string
         return '{}\n{}\n{}'.format(number,name,time)
@@ -623,6 +627,18 @@ class FrontEnd(wx.Frame):
                     self.firstTextBox.SetValue('\nLoading Selected Setting...')
                     self.secondTextBox.SetValue('')
                     self.thirdTextBox.SetValue('')
+            
+            # else we are blacklisting a call from the history
+            else:
+                menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
+                # ripped from https://stackoverflow.com/a/1451407
+                all = string.maketrans('', '')
+                nodigs = all.translate(all, string.digits)
+                numToBlacklist = menuStr.translate(all, nodigs) + ':no'
+                self.sendMessage('call_blacklist', numToBlacklist, False)
+                self.menu_items_list[self.menu_ptr] = '\nCaller blacklisted!'
+                self.setValues()
+                
 
         # If the user hits backspace (or cancel)
         if self.key_by_ascii_dict[code] == 'backspace':
