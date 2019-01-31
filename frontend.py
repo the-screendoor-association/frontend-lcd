@@ -7,24 +7,18 @@
  Last Modified: 11/08/2018
 '''
 
-import wx, gnsq, time, pyautogui, string
+import wx, gnsq, time, string
 from threading import Thread
+from multiprocessing import Process, Pipe
 from datetime import datetime
 
-# All readers are declared globally so that they can be shared among threads
-call_rec_reader = gnsq.Reader('call_received', 'frontend_lcd', '127.0.0.1:4150')
-hist_give_reader = gnsq.Reader('history_give', 'frontend_lcd', '127.0.0.1:4150')
-set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
-set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
-
-# Global variables to hold the message from each respective reader
-global CALL_INC, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG, FIRST_BOOT
+# Global variables to let the timer function know to do something
+global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
 CALL_INC = False
-FIRST_BOOT = True
+UPDATE = False
+CALL_REC = False
 CALL_REC_MSG = ''
-HIST_GIVE_MSG = ''
-SET_ALL_MSG = ''
-SET_GIVE_MSG = ''
+LOAD_HIST = False
 
 class FrontEnd(wx.Frame):
     '''
@@ -56,18 +50,10 @@ class FrontEnd(wx.Frame):
 
         # The key_by_ascii_dict is used to convert ascii characters into
         # easier to understand buttons on the keyboard
-        self.key_by_ascii_dict = {314:'left',
-                                  315:'up',
-                                  316:'right',
+        self.key_by_ascii_dict = {315:'up',
                                   317:'down',
                                   13:'enter',
-                                  8:'backspace',
-                                  307:'alt',
-                                  347:'f8',
-                                  348:'f9',
-                                  349:'f10',
-                                  350:'f11',
-                                  351:'f12'}
+                                  8:'backspace'}
 
         # Nsqd object used to transmit messages to localhost
         self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
@@ -109,9 +95,6 @@ class FrontEnd(wx.Frame):
         # Load the other GUI elements
         self.setupGUIElements()
 
-        # Start the reader threads
-        self.setupThreads()
-
         # A dictionary so that I can dynamically use textboxes using only
         # an index for reference.
         self.text_box_num_dict = {0:self.firstTextBox,
@@ -121,174 +104,139 @@ class FrontEnd(wx.Frame):
         # Display a loading message until call history is loaded
         self.firstTextBox.SetValue('\nLoading Call History...')
 
+        # Start the reader threads
+        #self.setupThreads()
+        self.reader_pipe, reader_child_pipe = Pipe()
+        reader_proc = Process(target=self.readerThreads, args=(reader_child_pipe,))
+        reader_proc.start()
+
+        msg_proc = Thread(target=self.checkForMessages, args=(self.reader_pipe,))
+        msg_proc.start()
+
         # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
 
-    @call_rec_reader.on_message.connect
-    def call_rec_handler(reader, message):
-        '''
-        function:
-            call_rec_handler: This function handles what to do when a message
-                              from topic call_received is received
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.onTimer)
+        self.timer.Start(500)
 
-        args:
-            reader: an instance of the reader object
-            message: an object that contains the message
+    def onTimer(self, event):
+        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
+        if UPDATE:
+            UPDATE = False
+            self.setValues()
 
-        returns:
-            None
+        elif CALL_REC:
+            # Get the incoming call info, format it, and display it on the screen
+            msg_list = CALL_REC_MSG.split(':')
+            num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4:])
+            self.firstTextBox.SetValue('\nIncoming Call From')
+            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[1],num))
+            self.thirdTextBox.SetValue(u'Press the "Select" button to block this caller!')
+            CALL_REC = False
+            
+        elif LOAD_HIST:
+            self.selecting_setting = False
+            self.using_settings = False
+            self.firstTextBox.SetValue('\nLoading Call History...')
+            self.secondTextBox.SetValue('')
+            self.thirdTextBox.SetValue('')
+            self.loadCallHistory()
+            LOAD_HIST = False
 
-        raises:
-            None
-        '''
-        global CALL_REC_MSG, CALL_INC
-        CALL_REC_MSG = message.body
-        CALL_INC = True
-        print 'Got call received message: {}'.format(message.body)
-        pyautogui.press('f9')
-        print 'Displaying caller info and waiting 30 sec...'
-        time.sleep(30)
-        print 'Displaying original menu again'
-        pyautogui.press('f8')
+        self.timer.Start(5)
 
-    @hist_give_reader.on_message.connect
-    def hist_give_handler(reader, message):
-        '''
-        function:
-            hist_give_handler: This function handles what to do when a message
-                               from topic history_five is received
+    def checkForMessages(self, reader_pipe=None):
+        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, CALL_INC
+        while True:
+            if reader_pipe.poll():
+                msg = reader_pipe.recv()
+                if msg[0] == 'hist_give':
+                    # Make a list of all elements
+                    msg_list = msg[1].split(':')
+                    # If we receive an unrequested message history...
+                    if msg_list[1] == '0' and not msg_list[0] == '0':
+                        # Reset the menu pointers and reload the history
+                        self.menu_items_list = ['{}\nSettings\n{}'.format(self.line_space,self.line_space)]
+                        self.menu_ptr = 1
+                        self.current_selected_text_box = 0
+                        self.current_top_ptr = 1
+                        self.using_settings = False
+                        self.selecting_setting = False
+                        self.end_of_call_history = False
+                    
+                    # If the backend says there's no more history...
+                    if msg_list[0] == '0':
+                        # Display "End of Call History" as the last element
+                        self.end_of_call_history = True
+                        self.menu_items_list.append('{}\nEnd of Call History\n{}'.format(self.line_space,self.line_space))
+                    # Otherwise, ask for 10 more elements based on an offset of the last
+                    # element that is loaded
+                    else:
+                        for item in range(2,int(msg_list[0])+2):
+                            sub_msg_list = msg_list[item].split(';')
+                            self.menu_items_list.append(self.formatMenuItem(sub_msg_list[0],sub_msg_list[1],sub_msg_list[2]))
 
-        args:
-            reader: an instance of the reader object
-            message: an object that contains the message
+                    # Indicate that the message is received and load the GUI values
+                    self.waiting_for_message = False
+                    UPDATE = True
 
-        returns:
-            None
+                elif msg[0] == 'set_all':
+                    # Make a list of all of the settings
+                    msg_list = msg[1].split(':')
+                    self.settings_list = []
+                    # Format each setting and put them into the list
+                    for setting in msg_list:
+                        self.settings_list.append('{}\n{}\n{}'.format(self.line_space,setting,self.line_space))
+                        self.end_of_settings_ptr += 1
+                    self.settings_list.append('{}\nEnd of Settings\n{}'.format(self.line_space,self.line_space))
 
-        raises:
-            None
-        '''
-        global HIST_GIVE_MSG, FIRST_BOOT
-        HIST_GIVE_MSG = message.body
-        print 'Got history give message: {}'.format(message.body)
-        if FIRST_BOOT:
-            time.sleep(1)
-            FIRST_BOOT = False
-        pyautogui.press('f10')
+                    # Indicate that the message is received and load the GUI values
+                    self.waiting_for_message = False
+                    #self.setValues()
+                    UPDATE = True
 
-    @set_all_reader.on_message.connect
-    def set_all_handler(reader, message):
-        '''
-        function:
-            set_all_handler: This function handles what to do when a message
-                             from topic settings_all is received
+                elif msg[0] == 'set_give':
+                    # Make a list of the setting states
+                    msg_list = msg[1].split(':')
 
-        args:
-            reader: an instance of the reader object
-            message: an object that contains the message
+                    # Save the name of that state
+                    self.state_name = msg_list[0]
+                    self.setting_state_list = []
 
-        returns:
-            None
+                    # Calculate the necessary space for the name and help message
+                    name_pad_space = int((32 - len(msg_list[0]))/2)
+                    help_pad_space = int((32 - len(msg_list[1]))/2)
 
-        raises:
-            None
-        '''
-        global SET_ALL_MSG
-        SET_ALL_MSG = message.body
-        print 'Got settings all message: {}'.format(message.body)
-        pyautogui.press('f11')
+                    # Append the name, help message, and current state as the first entry
+                    self.setting_state_list.append('{}{}{}\nCurrently: {}\n{}{}{}'.format(name_pad_space*' ',msg_list[0],name_pad_space*' ',msg_list[2],help_pad_space*' ',msg_list[1],help_pad_space*' '))
+                    
+                    # Make a list of the states for that setting
+                    states_list = msg_list[3].split(';')
 
-    @set_give_reader.on_message.connect
-    def set_give_handler(reader, message):
-        '''
-        function:
-            set_give_handler: This function handles what to do when a message
-                              from topic settings_give is received
+                    # Append each state to the list
+                    for state in states_list:
+                        self.setting_state_list.append('{}\n{}\n{}'.format(self.line_space,state,self.line_space))
+                    
+                    # Add "End of List" as the last entry
+                    self.setting_state_list.append('{}\nEnd of List\n{}'.format(self.line_space,self.line_space))
+                    
+                    # Indicate that the message has been received and load the GUI values
+                    self.waiting_for_message = False
+                    #self.setValues()
+                    UPDATE = True
 
-        args:
-            reader: an instance of the reader object
-            message: an object that contains the message
+                elif msg[0] == 'call_rec':
+                    CALL_INC = True
+                    CALL_REC_MSG = msg[1]
+                    CALL_REC = True
+                    
+                elif msg[0] == 'load_hist':
+                    LOAD_HIST = True
+                    
+            time.sleep(0.05)
 
-        returns:
-            None
-
-        raises:
-            None
-        '''
-        global SET_GIVE_MSG
-        SET_GIVE_MSG = message.body
-        print 'Got setting give message: {}'.format(message.body)
-        pyautogui.press('f12')
-
-    def call_rec_reader_thread(self):
-        '''
-        function:
-            call_rec_reader_thread: This function starts the call_received
-                                    reader listener
-
-        args:
-            None
-
-        returns:
-            None
-
-        raises:
-            None
-        '''
-        call_rec_reader.start()
-
-    def hist_give_reader_thread(self):
-        '''
-        function:
-            hist_give_reader_thread: This function starts the history_give
-                                     reader listener
-
-        args:
-            None
-
-        returns:
-            None
-
-        raises:
-            None
-        '''
-        hist_give_reader.start()
-
-    def set_all_reader_thread(self):
-        '''
-        function:
-            set_all_reader_thread: This function starts the settings_all
-                                   reader listener
-
-        args:
-            None
-
-        returns:
-            None
-
-        raises:
-            None
-        '''
-        set_all_reader.start()
-
-    def set_give_reader_thread(self):
-        '''
-        function:
-            set_give_reader_thread: This function starts the setting_give
-                                    reader listener
-
-        args:
-            None
-
-        returns:
-            None
-
-        raises:
-            None 
-        '''
-        set_give_reader.start()
-
-    def setupThreads(self):
+    def readerThreads(self, pipe):
         '''
         function:
             setupThreads: This function sets up and starts all of the reader threads
@@ -302,23 +250,105 @@ class FrontEnd(wx.Frame):
         raises:
             None
         '''
+        # All readers are declared globally so that they can be shared among threads
+        call_rec_reader = gnsq.Reader('call_received', 'frontend_lcd', '127.0.0.1:4150')
+        hist_give_reader = gnsq.Reader('history_give', 'frontend_lcd', '127.0.0.1:4150')
+        set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
+        set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
 
-        # Make a list of all of the thread functions as well as the global objects
-        reader_threads = [self.call_rec_reader_thread, self.hist_give_reader_thread, self.set_all_reader_thread, self.set_give_reader_thread]
-        reader_objs = [call_rec_reader, hist_give_reader, set_all_reader, set_give_reader]
+        global frontend_conn
+        frontend_conn = pipe
 
-        # Start each thread and start their daemon
-        for reader_thread in reader_threads:
-            t = Thread(target=reader_thread)
-            t.daemon = True
-            t.start()
+        @call_rec_reader.on_message.connect
+        def call_rec_handler(reader, message):
+            '''
+            function:
+                call_rec_handler: This function handles what to do when a message
+                                  from topic call_received is received
 
-        # Try to join each thread if possible but it is not detrimental if we cannot
-        try:
-            for reader_obj in reader_objs:
-                reader_obj.join()
-        except:
-            print '<Warning> Could not join threads'
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            global CALL_INC
+            CALL_INC = True
+            print 'Got call received message: {}'.format(message.body)
+            frontend_conn.send(['call_rec',message.body])
+            print 'Displaying caller info and waiting 30 sec...'
+            time.sleep(30)
+            print 'Displaying original menu again'
+            frontend_conn.send(['load_hist','NULL'])
+
+        @hist_give_reader.on_message.connect
+        def hist_give_handler(reader, message):
+            '''
+            function:
+                hist_give_handler: This function handles what to do when a message
+                                   from topic history_five is received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            print 'Got history give message: {}'.format(message.body)
+            frontend_conn.send(['hist_give',message.body])
+
+        @set_all_reader.on_message.connect
+        def set_all_handler(reader, message):
+            '''
+            function:
+                set_all_handler: This function handles what to do when a message
+                                 from topic settings_all is received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            print 'Got settings all message: {}'.format(message.body)
+            frontend_conn.send(['set_all',message.body])
+
+        @set_give_reader.on_message.connect
+        def set_give_handler(reader, message):
+            '''
+            function:
+                set_give_handler: This function handles what to do when a message
+                                  from topic settings_give is received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            print 'Got setting give message: {}'.format(message.body)
+            frontend_conn.send(['set_give',message.body])
+
+        call_rec_reader.start(block=False)
+        hist_give_reader.start(block=False)
+        set_all_reader.start(block=False)
+        set_give_reader.start()
 
     def sendMessage(self, topic, message, wait):
         '''
@@ -342,8 +372,7 @@ class FrontEnd(wx.Frame):
         # GUI will wait for a received message before continuing (e.g. if the 
         # user requests the settings, we will wait for the settings to come back
         # before letting the user do something
-        if wait:
-            self.waiting_for_message = True
+        self.waiting_for_message = wait
         print 'Sending message:{} to topic:{}'.format(message,topic)
         self.conn.publish(topic,message)
 
@@ -534,7 +563,7 @@ class FrontEnd(wx.Frame):
 	'''
 
         # These global variables are used to pass the messages between the handler and here
-        global CALL_INC, CALL_REC_MSG, HIST_GIVE_MSG, SET_ALL_MSG, SET_GIVE_MSG
+        global CALL_INC
         
         # Get the event code
         code = event.GetKeyCode()
@@ -628,8 +657,12 @@ class FrontEnd(wx.Frame):
                     self.secondTextBox.SetValue('')
                     self.thirdTextBox.SetValue('')
             
+            elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History':
+                return
+
             # else we are blacklisting a call from the history
             else:
+                print 'self.menu_ptr={} self.current_top_ptr={} self.current_selected_text_box={}'.format(self.menu_ptr, self.current_top_ptr, self.current_selected_text_box)
                 menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
                 nameStr = self.menu_items_list[self.menu_ptr].split('\n')[1]
 
@@ -666,100 +699,6 @@ class FrontEnd(wx.Frame):
                     self.current_selected_text_box = 0
                     self.current_top_ptr = 1
                     self.setValues()
-
-        # F8 is an internal press that means return call history back to normal...
-        if self.key_by_ascii_dict[code] == 'f8':
-            self.selecting_setting = False
-            self.using_settings = False
-            self.firstTextBox.SetValue('\nLoading Call History...')
-            self.secondTextBox.SetValue('')
-            self.thirdTextBox.SetValue('')
-            self.loadCallHistory()
-
-        # F9 is an internal press that means call is incoming...
-        if self.key_by_ascii_dict[code] == 'f9':
-            # Get the incoming call info, format it, and display it on the screen
-            msg_list = CALL_REC_MSG.split(':')
-            num = '{} ({}) {} - {}'.format(msg_list[0][:1],msg_list[0][1:4],msg_list[0][4:7],msg_list[0][-4:])
-            self.firstTextBox.SetValue('\nIncoming Call From')
-            self.secondTextBox.SetValue('{}\n{}'.format(msg_list[1],num))
-            self.thirdTextBox.SetValue(u'Press the "Select" button to block this caller!')
-
-        # F10 is an internal press that means we received more call history...
-        if self.key_by_ascii_dict[code] == 'f10':
-            # Make a list of all elements
-            msg_list = HIST_GIVE_MSG.split(':')
-            # If we receive an unrequested message history...
-            if msg_list[1] == '0' and not msg_list[0] == '0':
-                # Reset the menu pointers and reload the history
-                self.menu_items_list = ['{}\nSettings\n{}'.format(self.line_space,self.line_space)]
-                self.menu_ptr = 1
-                self.current_selected_text_box = 0
-                self.current_top_ptr = 1
-                self.using_settings = False
-                self.selecting_setting = False
-                self.end_of_call_history = False
-            
-            # If the backend says there's no more history...
-            if msg_list[0] == '0':
-                # Display "End of Call History" as the last element
-                self.end_of_call_history = True
-                self.menu_items_list.append('{}\nEnd of Call History\n{}'.format(self.line_space,self.line_space))
-            # Otherwise, ask for 10 more elements based on an offset of the last
-            # element that is loaded
-            else:
-                for item in range(2,int(msg_list[0])+2):
-                    sub_msg_list = msg_list[item].split(';')
-                    self.menu_items_list.append(self.formatMenuItem(sub_msg_list[0],sub_msg_list[1],sub_msg_list[2]))
-
-            # Indicate that the message is received and load the GUI values
-            self.waiting_for_message = False
-            self.setValues()
-
-        # F11 is an internal press that means we got a list of settings
-        if self.key_by_ascii_dict[code] == 'f11':
-            # Make a list of all of the settings
-            msg_list = SET_ALL_MSG.split(':')
-            self.settings_list = []
-            # Format each setting and put them into the list
-            for setting in msg_list:
-                self.settings_list.append('{}\n{}\n{}'.format(self.line_space,setting,self.line_space))
-                self.end_of_settings_ptr += 1
-            self.settings_list.append('{}\nEnd of Settings\n{}'.format(self.line_space,self.line_space))
-
-            # Indicate that the message is received and load the GUI values
-            self.waiting_for_message = False
-            self.setValues()
-
-        # F12 is an internal press that means we got a list of setting states
-        if self.key_by_ascii_dict[code] == 'f12':
-            # Make a list of the setting states
-            msg_list = SET_GIVE_MSG.split(':')
-
-            # Save the name of that state
-            self.state_name = msg_list[0]
-            self.setting_state_list = []
-
-            # Calculate the necessary space for the name and help message
-            name_pad_space = int((32 - len(msg_list[0]))/2)
-            help_pad_space = int((32 - len(msg_list[1]))/2)
-
-            # Append the name, help message, and current state as the first entry
-            self.setting_state_list.append('{}{}{}\nCurrently: {}\n{}{}{}'.format(name_pad_space*' ',msg_list[0],name_pad_space*' ',msg_list[2],help_pad_space*' ',msg_list[1],help_pad_space*' '))
-            
-            # Make a list of the states for that setting
-            states_list = msg_list[3].split(';')
-
-            # Append each state to the list
-            for state in states_list:
-                self.setting_state_list.append('{}\n{}\n{}'.format(self.line_space,state,self.line_space))
-            
-            # Add "End of List" as the last entry
-            self.setting_state_list.append('{}\nEnd of List\n{}'.format(self.line_space,self.line_space))
-            
-            # Indicate that the message has been received and load the GUI values
-            self.waiting_for_message = False
-            self.setValues()
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
