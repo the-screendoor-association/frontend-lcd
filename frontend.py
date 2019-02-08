@@ -11,6 +11,7 @@ import wx, gnsq, time, string
 from threading import Thread
 from multiprocessing import Process, Pipe
 from datetime import datetime
+from Xlib import X, display
 
 # Global variables to let the timer function know to do something
 global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
@@ -45,6 +46,13 @@ class FrontEnd(wx.Frame):
             None
         '''
 
+        # Move the cursor out of the way
+        d = display.Display()
+        s = d.screen()
+        root = s.root
+        root.warp_pointer(1200,1200)
+        d.sync()
+
         # Call the super class to build the GUI
         super(FrontEnd, self).__init__(parent,title=title, size=(800,480))
 
@@ -53,7 +61,8 @@ class FrontEnd(wx.Frame):
         self.key_by_ascii_dict = {315:'up',
                                   317:'down',
                                   13:'enter',
-                                  8:'backspace'}
+                                  8:'backspace',
+                                  307:'alt'}
 
         # Nsqd object used to transmit messages to localhost
         self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
