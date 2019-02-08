@@ -175,9 +175,14 @@ class FrontEnd(wx.Frame):
                     else:
                         for item in range(2,int(msg_list[0])+2):
                             sub_msg_list = msg_list[item].split(';')
-                            self.menu_items_list.append(self.formatMenuItem(sub_msg_list[0],sub_msg_list[1],sub_msg_list[2]))
+                            menu_item = self.formatMenuItem(sub_msg_list[0], sub_msg_list[1], sub_msg_list[2], sub_msg_list[3])
+                            if menu_item == 'BLOCKED':
+                                self.menu_items_list.append('{}\n{}\n{}'.format(self.line_space, menu_item, self.line_space))
+                            else:
+                                self.menu_items_list.append(menu_item)
 
                     # Indicate that the message is received and load the GUI values
+                    #print '{}'.format(self.menu_items_list)
                     self.waiting_for_message = False
                     UPDATE = True
 
@@ -506,7 +511,7 @@ class FrontEnd(wx.Frame):
         textBox.SetFocus()
         textBox.SetSelection(-1,-1)
 
-    def formatMenuItem(self, number, name, time):
+    def formatMenuItem(self, number, name, time, wasBlocked):
         '''
         function:
             formatMenuItem: function to format the name, number and
@@ -539,6 +544,11 @@ class FrontEnd(wx.Frame):
         
         num_pad_spaces = int((32 - len(dateStr))/2)
         time = '{}{}{}'.format(num_pad_spaces*' ',dateStr,num_pad_spaces*' ')
+
+        if wasBlocked == '1':
+            num_pad_spaces = int((32 - len('Blocked'))/2)
+            blocked = '{}{}{}'.format(num_pad_spaces*' ','Blocked',num_pad_spaces*' ')
+            return '{}\n{}\n{}'.format(number,name, blocked)
 
         # Return the reformatted string
         return '{}\n{}\n{}'.format(number,name,time)
@@ -657,12 +667,11 @@ class FrontEnd(wx.Frame):
                     self.secondTextBox.SetValue('')
                     self.thirdTextBox.SetValue('')
             
-            elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History':
+            elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
                 return
 
             # else we are blacklisting a call from the history
             else:
-                print 'self.menu_ptr={} self.current_top_ptr={} self.current_selected_text_box={}'.format(self.menu_ptr, self.current_top_ptr, self.current_selected_text_box)
                 menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
                 nameStr = self.menu_items_list[self.menu_ptr].split('\n')[1]
 
