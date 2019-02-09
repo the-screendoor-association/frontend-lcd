@@ -14,12 +14,13 @@ from datetime import datetime
 from Xlib import X, display
 
 # Global variables to let the timer function know to do something
-global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
+global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE
 CALL_INC = False
 UPDATE = False
 CALL_REC = False
 CALL_REC_MSG = ''
 LOAD_HIST = False
+BLACK_GIVE = False
 
 class FrontEnd(wx.Frame):
     '''
@@ -83,6 +84,9 @@ class FrontEnd(wx.Frame):
         self.end_of_call_history = False
         self.waiting_for_message = False
         self.selecting_setting = False
+        self.using_blacklist = False
+        self.end_of_blacklist = False
+        self.showing_warning = False
         self.state_name = ''
 
         # 32 spaces which is enough for a blank line
@@ -97,6 +101,9 @@ class FrontEnd(wx.Frame):
 
         # This is the setting state list. It will contain states for a particular setting
         self.setting_state_list = []
+
+        # This is the blacklist. It will contain different numbers that have been blacklisted
+        self.blacklist = []
 
         # Center the GUI on the display
         self.Centre()
@@ -156,7 +163,7 @@ class FrontEnd(wx.Frame):
         self.timer.Start(5)
 
     def checkForMessages(self, reader_pipe=None):
-        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, CALL_INC
+        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, CALL_INC, BLACK_GIVE
         while True:
             if reader_pipe.poll():
                 msg = reader_pipe.recv()
@@ -191,7 +198,6 @@ class FrontEnd(wx.Frame):
                                 self.menu_items_list.append(menu_item)
 
                     # Indicate that the message is received and load the GUI values
-                    #print '{}'.format(self.menu_items_list)
                     self.waiting_for_message = False
                     UPDATE = True
 
@@ -199,6 +205,10 @@ class FrontEnd(wx.Frame):
                     # Make a list of all of the settings
                     msg_list = msg[1].split(':')
                     self.settings_list = []
+
+                    # Make Blacklist the first setting
+                    self.settings_list.append('{}\nBlacklist\n{}'.format(self.line_space,self.line_space))
+
                     # Format each setting and put them into the list
                     for setting in msg_list:
                         self.settings_list.append('{}\n{}\n{}'.format(self.line_space,setting,self.line_space))
@@ -247,8 +257,40 @@ class FrontEnd(wx.Frame):
                     
                 elif msg[0] == 'load_hist':
                     LOAD_HIST = True
+
+                elif msg[0] == 'black_give':
+                    self.load_blacklist(msg[1])
+                    UPDATE = True
                     
             time.sleep(0.05)
+
+    def load_blacklist(self, msg):
+        msg_list = msg.split(':')
+        if msg_list[1] == '0' and not msg_list[0] == '0':
+            # Reset the menu pointers and reload the history
+            self.blacklist = ['  Press "Select" on any of these\nnumbers to remove them from the\n           blacklist.           ']
+            self.menu_ptr = 0
+            self.current_selected_text_box = 0
+            self.current_top_ptr = 0
+            self.using_settings = False
+            self.selecting_setting = False
+            self.end_of_blacklist = False
+        
+        # If the backend says there's no more history...
+        if msg_list[0] == '0':
+            # Display "End of Call History" as the last element
+            self.end_of_blacklist = True
+            self.blacklist.append('{}\nEnd of Blacklist\n{}'.format(self.line_space,self.line_space))
+        # Otherwise, ask for 10 more elements based on an offset of the last
+        # element that is loaded
+        else:
+            numbers = msg_list[2].split(';')
+            #print 'numbers_list = {}'.format(numbers)
+            for number in numbers:
+                self.blacklist.append('{}\n{} ({}) {} - {}\n{}'.format(self.line_space,number[:1],number[1:4],number[4:7],number[-4:],self.line_space))
+
+        # Indicate that the message is received and load the GUI values
+        self.waiting_for_message = False
 
     def readerThreads(self, pipe):
         '''
@@ -264,11 +306,12 @@ class FrontEnd(wx.Frame):
         raises:
             None
         '''
-        # All readers are declared globally so that they can be shared among threads
+        # All readers are declared locally and communicate throught the pipe
         call_rec_reader = gnsq.Reader('call_received', 'frontend_lcd', '127.0.0.1:4150')
         hist_give_reader = gnsq.Reader('history_give', 'frontend_lcd', '127.0.0.1:4150')
         set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
         set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
+        black_give_reader = gnsq.Reader('blacklist_give', 'frontend_lcd', '127.0.0.1:4150')
 
         global frontend_conn
         frontend_conn = pipe
@@ -359,10 +402,26 @@ class FrontEnd(wx.Frame):
             print 'Got setting give message: {}'.format(message.body)
             frontend_conn.send(['set_give',message.body])
 
+        @black_give_reader.on_message.connect
+        def black_give_handler(reader, message):
+            '''
+            function
+                black_give_handler: This function handles what to do when a
+                                    message from topic blacklist_give is
+                                    received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message 
+            '''
+            print 'Got blacklist give message: {}'.format(message.body)
+            frontend_conn.send(['black_give',message.body])
+
         call_rec_reader.start(block=False)
         hist_give_reader.start(block=False)
         set_all_reader.start(block=False)
-        set_give_reader.start()
+        set_give_reader.start(block=False)
+        black_give_reader.start()
 
     def sendMessage(self, topic, message, wait):
         '''
@@ -490,7 +549,7 @@ class FrontEnd(wx.Frame):
 	    None
 	'''
         # Pick the list to use so that we can update the correct values        
-        list_to_use = self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
+        list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
 
         # Load the menu items based on what the current_top_ptr is pointing to
         self.firstTextBox.SetValue(list_to_use[self.current_top_ptr])
@@ -561,7 +620,12 @@ class FrontEnd(wx.Frame):
 
         # Return the reformatted string
         return '{}\n{}\n{}'.format(number,name,time)
-        
+
+    def unformatNumber(self, number):
+        chars = ['(', ')', '-']
+        for char in chars:
+            number = number.replace(char,'')
+        return number.replace(' ','').strip()
 
     def keyEventHandler(self, event):
 	'''
@@ -608,7 +672,7 @@ class FrontEnd(wx.Frame):
             # As long as we are not waiting for a message and there's no incoming call...
             if not CALL_INC and not self.waiting_for_message:
                 # Get the list to use
-                list_to_use = self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
+                list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
                 # Only do anything if we are not at the bottom of the list.
                 # Increment the pointers based on where we are in the GUI
                 if self.menu_ptr < len(list_to_use)-1:
@@ -619,8 +683,11 @@ class FrontEnd(wx.Frame):
                     self.menu_ptr+=1
 
                 # If the user wants to go further, then request more call history
-                elif not self.end_of_call_history and not self.waiting_for_message and not self.using_settings:
+                elif not self.end_of_call_history and not self.waiting_for_message and not self.using_settings and not self.using_blacklist:
                     self.sendMessage('history_get','10:{}'.format(len(self.menu_items_list)-1),True)
+
+                elif self.using_blacklist and not self.end_of_blacklist and not self.waiting_for_message and not self.using_settings:
+                    self.sendMessage('blacklist_get','10:{}'.format(len(list_to_use)-1),True)
 
                 # Update the values in the text boxes
                 self.setValues()
@@ -632,8 +699,9 @@ class FrontEnd(wx.Frame):
                 # Blacklist the incoming call and let the user know they blacklisted it
                 self.sendMessage('call_blacklist',CALL_REC_MSG,False)
                 self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
+
             # Otherwise, if the user selected "Settings"...
-            elif self.menu_ptr == 0 and not self.using_settings:
+            elif self.menu_ptr == 0 and not self.using_settings and not self.using_blacklist:
                 # Reset the pointers and request the settings
                 self.using_settings = True
                 self.menu_ptr = 0
@@ -644,6 +712,29 @@ class FrontEnd(wx.Frame):
                 self.secondTextBox.SetValue('')
                 self.thirdTextBox.SetValue('')
                 self.sendMessage('settings_request_all', 'no', True)
+
+            # Otherwise, if the user is looking at the blacklist warning message
+            elif self.showing_warning:
+                self.sendMessage('blacklist_remove', self.unformatNumber(self.blacklist[self.menu_ptr]), False)
+                self.firstTextBox.SetValue('\nLoading Blacklist...')
+                self.thirdTextBox.SetValue('')
+                self.sendMessage('blacklist_get','10:0',True)
+                self.showing_warning = False
+                self.using_blacklist = True
+                self.blacklist = []
+
+            # Otherwise, if the user is removing an number from the blacklist
+            elif self.using_blacklist and self.blacklist[self.menu_ptr].strip() != 'End of Blacklist' and self.menu_ptr != 0:
+                self.showing_warning = True
+                self.firstTextBox.SetValue('Are you sure you want to remove this number from the blacklist?')
+                self.secondTextBox.SetValue('Press "Select" to confirm or "Back" to cancel')
+                num = self.blacklist[self.menu_ptr]
+                self.thirdTextBox.SetValue(self.blacklist[self.menu_ptr])
+
+            # Othwise, if the user tries to remove the top index (which is invalid)
+            elif self.using_blacklist and (self.menu_ptr == 0 or self.blacklist[self.menu_ptr].strip() == 'End of Blacklist'):
+                return
+
             # Otherwise, if the user is selecting one of the setting states...
             elif self.selecting_setting:
                 # If the user did not pick something that's not a setting state...
@@ -665,16 +756,29 @@ class FrontEnd(wx.Frame):
             elif self.using_settings:
                 # If the user is not at the end of the settings list
                 if self.settings_list[self.menu_ptr].strip() != 'End of Settings':
-                    # Request the setting states from the backend, reset the pointers, and get
-                    # ready to display them
-                    self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
-                    self.selecting_setting = True
-                    self.menu_ptr = 1
-                    self.current_selected_text_box = 1
-                    self.current_top_ptr = 0
-                    self.firstTextBox.SetValue('\nLoading Selected Setting...')
-                    self.secondTextBox.SetValue('')
-                    self.thirdTextBox.SetValue('')
+
+                    if self.settings_list[self.menu_ptr].strip() == 'Blacklist':
+                        self.sendMessage('blacklist_get','10:0',True)
+                        self.menu_ptr = 0
+                        self.current_selected_text_box = 0
+                        self.current_top_ptr = 0
+                        self.using_blacklist = True
+                        self.firstTextBox.SetValue('\nLoading Blacklist...')
+                        self.secondTextBox.SetValue('')
+                        self.thirdTextBox.SetValue('')
+
+                    else:
+                        # Request the setting states from the backend and get
+                        # ready to display them
+                        self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
+                        # Reset the pointers
+                        self.menu_ptr = 1
+                        self.current_selected_text_box = 1
+                        self.current_top_ptr = 0
+                        self.selecting_setting = True
+                        self.firstTextBox.SetValue('\nLoading Selected Setting...')
+                        self.secondTextBox.SetValue('')
+                        self.thirdTextBox.SetValue('')
             
             elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
                 return
@@ -697,8 +801,28 @@ class FrontEnd(wx.Frame):
         if self.key_by_ascii_dict[code] == 'backspace':
             # If there is no incoming call and we are not waiting for a message...
             if not CALL_INC and not self.waiting_for_message:
+                # If the user is seeing the blacklist warning
+                if self.showing_warning:
+                    self.showing_warning = False
+                    self.using_blacklist = True
+                    self.menu_ptr = 0
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 0
+                    self.setValues()
+
+                # If the user is looking at the blacklist...
+                elif self.using_blacklist:
+                    self.using_blacklist = False
+                    self.using_settings = True
+                    self.menu_ptr = 0
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 0
+                    self.setValues()
+
+                
+
                 # If the user is picking a setting state...
-                if self.selecting_setting:
+                elif self.selecting_setting:
                     # Reset the pointers and go back to settings
                     self.menu_ptr = 0
                     self.current_selected_text_box = 0
