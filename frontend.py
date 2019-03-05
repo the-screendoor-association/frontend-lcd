@@ -151,7 +151,7 @@ class FrontEnd(wx.Frame):
     def onTimer(self, event):
         global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
         elapsed_time = datetime.now() - self.on_time
-        if elapsed_time > self.timeout:
+        if elapsed_time.total_seconds() > self.timeout:
             self.turnOnBacklight(False)
 
         if UPDATE:
@@ -780,7 +780,8 @@ class FrontEnd(wx.Frame):
                     self.selecting_setting = False
                     state = self.setting_state_list[self.menu_ptr].strip()
                     if self.state_name == 'Display timeout':
-                        self.timeout = state
+                        self.timeout = int(state)
+                        self.on_time = datetime.now()
                     self.sendMessage('setting_set', '{}:{}'.format(self.state_name, state), False)
                     self.menu_ptr = 0
                     self.current_selected_text_box = 0
