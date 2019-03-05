@@ -11,7 +11,8 @@ import wx, gnsq, time, string
 from threading import Thread
 from multiprocessing import Process, Pipe
 from datetime import datetime
-from Xlib import X, display
+from Xlib import display
+from RPi import GPIO
 
 # Global variables to let the timer function know to do something
 global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE
@@ -65,6 +66,9 @@ class FrontEnd(wx.Frame):
                                   8:'backspace',
                                   307:'alt'}
 
+        self.button_gpios = [29,31,33,35]
+        self.lcd_gpio = 38
+
         # Nsqd object used to transmit messages to localhost
         self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
 
@@ -88,6 +92,9 @@ class FrontEnd(wx.Frame):
         self.end_of_blacklist = False
         self.showing_warning = False
         self.state_name = ''
+        self.timeout = 30
+        self.on_time = datetime.now()
+        self.first_timeout_message = True
 
         # 32 spaces which is enough for a blank line
         self.line_space = 32*' '
@@ -105,6 +112,9 @@ class FrontEnd(wx.Frame):
         # This is the blacklist. It will contain different numbers that have been blacklisted
         self.blacklist = []
 
+        # Setup GPIO pins for LCD and buttons
+        self.setupGPIO()
+
         # Center the GUI on the display
         self.Centre()
 
@@ -121,13 +131,15 @@ class FrontEnd(wx.Frame):
         self.firstTextBox.SetValue('\nLoading Call History...')
 
         # Start the reader threads
-        #self.setupThreads()
         self.reader_pipe, reader_child_pipe = Pipe()
         reader_proc = Process(target=self.readerThreads, args=(reader_child_pipe,))
         reader_proc.start()
 
         msg_proc = Thread(target=self.checkForMessages, args=(self.reader_pipe,))
         msg_proc.start()
+
+        # Ask the backend for the display idle timeout value
+        self.sendMessage('setting_get', 'Display timeout', True)
 
         # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
@@ -138,6 +150,10 @@ class FrontEnd(wx.Frame):
 
     def onTimer(self, event):
         global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
+        elapsed_time = datetime.now() - self.on_time
+        if elapsed_time > self.timeout:
+            self.turnOnBacklight(False)
+
         if UPDATE:
             UPDATE = False
             self.setValues()
@@ -161,6 +177,21 @@ class FrontEnd(wx.Frame):
             LOAD_HIST = False
 
         self.timer.Start(5)
+
+    def setupGPIO(self):
+        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(self.lcd_gpio, GPIO.OUT)
+        for pin in self.button_gpios:
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+        GPIO.output(self.lcd_gpio, GPIO.HIGH)
+
+    def turnOnBacklight(self, on):
+        if on:
+            GPIO.output(self.lcd_gpio, GPIO.HIGH)
+            self.on_time = datetime.now()
+        else:
+            GPIO.output(self.lcd_gpio, GPIO.LOW)
 
     def checkForMessages(self, reader_pipe=None):
         global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, CALL_INC, BLACK_GIVE
@@ -247,8 +278,12 @@ class FrontEnd(wx.Frame):
                     
                     # Indicate that the message has been received and load the GUI values
                     self.waiting_for_message = False
-                    #self.setValues()
-                    UPDATE = True
+
+                    if self.first_timeout_message:
+                        self.timeout = int(msg_list[2])
+                        self.first_timeout_message = False
+                    else:
+                        UPDATE = True
 
                 elif msg[0] == 'call_rec':
                     CALL_INC = True
@@ -651,6 +686,8 @@ class FrontEnd(wx.Frame):
         # Get the event code
         code = event.GetKeyCode()
 
+        self.turnOnBacklight(True)
+
         # If the event is an up arrow key pressed...
         if self.key_by_ascii_dict[code] == 'up':
             # As long as we are not waiting for a message and there's no incoming call...
@@ -741,7 +778,10 @@ class FrontEnd(wx.Frame):
                 if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
                     # Reset the pointers and tell the backend to save this setting
                     self.selecting_setting = False
-                    self.sendMessage('setting_set', '{}:{}'.format(self.state_name,self.setting_state_list[self.menu_ptr].strip()), False)
+                    state = self.setting_state_list[self.menu_ptr].strip()
+                    if self.state_name == 'Display timeout':
+                        self.timeout = state
+                    self.sendMessage('setting_set', '{}:{}'.format(self.state_name, state), False)
                     self.menu_ptr = 0
                     self.current_selected_text_box = 0
                     self.current_top_ptr = 0
