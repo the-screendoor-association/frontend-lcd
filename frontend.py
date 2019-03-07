@@ -68,6 +68,10 @@ class FrontEnd(wx.Frame):
 
         self.button_gpios = [29,31,33,35]
         self.lcd_gpio = 38
+        self.button_handler_dict = {29:self.selectHandler(),
+                                    31:self.upHandler(),
+                                    33:self.downHandler(),
+                                    35:self.backHandler()}
 
         # Nsqd object used to transmit messages to localhost
         self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
@@ -154,6 +158,8 @@ class FrontEnd(wx.Frame):
         if elapsed_time.total_seconds() > self.timeout:
             self.turnOnBacklight(False)
 
+        self.checkForButtonPresses()
+
         if UPDATE:
             UPDATE = False
             self.setValues()
@@ -177,6 +183,207 @@ class FrontEnd(wx.Frame):
             LOAD_HIST = False
 
         self.timer.Start(5)
+
+    def checkForButtonPresses(self):
+        for pin in self.button_handler_dict.keys():
+            if not GPIO.input(pin): # Check for a high to low edge
+                self.turnOnBacklight(True)
+                self.button_handler_dict[pin]
+
+    def selectHandler(self):
+        global CALL_INC
+
+        # If there is an incoming call...
+        if CALL_INC:
+            # Blacklist the incoming call and let the user know they blacklisted it
+            self.sendMessage('call_blacklist',CALL_REC_MSG,False)
+            self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
+
+        # Otherwise, if the user selected "Settings"...
+        elif self.menu_ptr == 0 and not self.using_settings and not self.using_blacklist:
+            # Reset the pointers and request the settings
+            self.using_settings = True
+            self.menu_ptr = 0
+            self.current_selected_text_box = 0
+            self.current_top_ptr = 0
+            self.end_of_settings_ptr = 1
+            self.firstTextBox.SetValue('\nLoading Current Settings...')
+            self.secondTextBox.SetValue('')
+            self.thirdTextBox.SetValue('')
+            self.sendMessage('settings_request_all', 'no', True)
+
+        # Otherwise, if the user is looking at the blacklist warning message
+        elif self.showing_warning:
+            self.sendMessage('blacklist_remove', self.unformatNumber(self.blacklist[self.menu_ptr]), False)
+            self.firstTextBox.SetValue('\nLoading Blacklist...')
+            self.thirdTextBox.SetValue('')
+            self.sendMessage('blacklist_get','10:0',True)
+            self.showing_warning = False
+            self.using_blacklist = True
+            self.blacklist = []
+
+        # Otherwise, if the user is removing an number from the blacklist
+        elif self.using_blacklist and self.blacklist[self.menu_ptr].strip() != 'End of Blacklist' and self.menu_ptr != 0:
+            self.showing_warning = True
+            self.firstTextBox.SetValue('Are you sure you want to remove this number from the blacklist?')
+            self.secondTextBox.SetValue('Press "Select" to confirm or "Back" to cancel')
+            num = self.blacklist[self.menu_ptr]
+            self.thirdTextBox.SetValue(self.blacklist[self.menu_ptr])
+
+        # Othwise, if the user tries to remove the top index (which is invalid)
+        elif self.using_blacklist and (self.menu_ptr == 0 or self.blacklist[self.menu_ptr].strip() == 'End of Blacklist'):
+            return
+
+        # Otherwise, if the user is selecting one of the setting states...
+        elif self.selecting_setting:
+            # If the user did not pick something that's not a setting state...
+            if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
+                # Reset the pointers and tell the backend to save this setting
+                self.selecting_setting = False
+                state = self.setting_state_list[self.menu_ptr].strip()
+                if self.state_name == 'Display timeout':
+                    self.timeout = int(state)
+                    self.on_time = datetime.now()
+                self.sendMessage('setting_set', '{}:{}'.format(self.state_name, state), False)
+                self.menu_ptr = 0
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 0
+
+                # Show the settings again
+                self.firstTextBox.SetValue(self.settings_list[self.menu_ptr])
+                self.secondTextBox.SetValue(self.settings_list[self.menu_ptr+1])
+                self.thirdTextBox.SetValue(self.settings_list[self.menu_ptr+2])
+                self.highlightBox(self.firstTextBox)
+
+        # Otherwise, if the user is selecting one of the settings...
+        elif self.using_settings:
+            # If the user is not at the end of the settings list
+            if self.settings_list[self.menu_ptr].strip() != 'End of Settings':
+
+                if self.settings_list[self.menu_ptr].strip() == 'Blacklist':
+                    self.sendMessage('blacklist_get','10:0',True)
+                    self.menu_ptr = 0
+                    self.current_selected_text_box = 0
+                    self.current_top_ptr = 0
+                    self.using_blacklist = True
+                    self.firstTextBox.SetValue('\nLoading Blacklist...')
+                    self.secondTextBox.SetValue('')
+                    self.thirdTextBox.SetValue('')
+
+                else:
+                    # Request the setting states from the backend and get
+                    # ready to display them
+                    self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
+                    # Reset the pointers
+                    self.menu_ptr = 1
+                    self.current_selected_text_box = 1
+                    self.current_top_ptr = 0
+                    self.selecting_setting = True
+                    self.firstTextBox.SetValue('\nLoading Selected Setting...')
+                    self.secondTextBox.SetValue('')
+                    self.thirdTextBox.SetValue('')
+        
+        elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
+            return
+
+        # else we are blacklisting a call from the history
+        else:
+            menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
+            nameStr = self.menu_items_list[self.menu_ptr].split('\n')[1]
+
+            # ripped from https://stackoverflow.com/a/1451407
+            all = string.maketrans('', '')
+            nodigs = all.translate(all, string.digits)
+            numToBlacklist = menuStr.translate(all, nodigs) + ':' + nameStr.replace(' ','')
+            self.sendMessage('call_blacklist', numToBlacklist, False)
+            self.menu_items_list[self.menu_ptr] = '{}\nCaller blacklisted!\n{}'.format(self.line_space, self.line_space)
+            self.setValues()
+
+    def upHandler(self):
+        global CALL_INC
+        # As long as we are not waiting for a message and there's no incoming call...
+        if not CALL_INC and not self.waiting_for_message:
+            # Only do anything if we are not at the top of the list.
+            # Decrement the pointers based on where we are in the GUI
+            if self.menu_ptr != 0:
+                if self.current_top_ptr == self.menu_ptr:
+                    self.current_top_ptr-=1
+                if self.current_selected_text_box != 0:
+                    self.current_selected_text_box-=1
+                self.menu_ptr-=1
+
+            # Update the values in the text boxes
+            self.setValues()
+
+    def downHandler(self):
+        global CALL_INC
+        # As long as we are not waiting for a message and there's no incoming call...
+        if not CALL_INC and not self.waiting_for_message:
+            # Get the list to use
+            list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
+            # Only do anything if we are not at the bottom of the list.
+            # Increment the pointers based on where we are in the GUI
+            if self.menu_ptr < len(list_to_use)-1:
+                if self.menu_ptr - 2 == self.current_top_ptr:
+                    self.current_top_ptr+=1
+                if self.current_selected_text_box != 2:
+                    self.current_selected_text_box+=1
+                self.menu_ptr+=1
+
+            # If the user wants to go further, then request more call history
+            elif not self.end_of_call_history and not self.waiting_for_message and not self.using_settings and not self.using_blacklist:
+                self.sendMessage('history_get','10:{}'.format(len(self.menu_items_list)-1),True)
+
+            elif self.using_blacklist and not self.end_of_blacklist and not self.waiting_for_message and not self.using_settings:
+                self.sendMessage('blacklist_get','10:{}'.format(len(list_to_use)-1),True)
+
+            # Update the values in the text boxes
+            self.setValues()
+
+    def backHandler(self):
+        global CALL_INC
+        # If there is no incoming call and we are not waiting for a message...
+        if not CALL_INC and not self.waiting_for_message:
+            # If the user is seeing the blacklist warning
+            if self.showing_warning:
+                self.showing_warning = False
+                self.using_blacklist = True
+                self.menu_ptr = 0
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 0
+                self.setValues()
+
+            # If the user is looking at the blacklist...
+            elif self.using_blacklist:
+                self.using_blacklist = False
+                self.using_settings = True
+                self.menu_ptr = 0
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 0
+                self.setValues()
+
+            
+
+            # If the user is picking a setting state...
+            elif self.selecting_setting:
+                # Reset the pointers and go back to settings
+                self.menu_ptr = 0
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 0
+                self.selecting_setting = False
+                self.firstTextBox.SetValue(self.settings_list[0])
+                self.secondTextBox.SetValue(self.settings_list[1])
+                self.thirdTextBox.SetValue(self.settings_list[2])
+                self.highlightBox(self.firstTextBox)
+
+            # Otherwise, if the user is selecting settings...
+            elif self.using_settings:
+                # Get the call history again
+                self.using_settings = False
+                self.menu_ptr = 1
+                self.current_selected_text_box = 0
+                self.current_top_ptr = 1
+                self.setValues()
 
     def setupGPIO(self):
         GPIO.setmode(GPIO.BOARD)
@@ -661,227 +868,6 @@ class FrontEnd(wx.Frame):
         for char in chars:
             number = number.replace(char,'')
         return number.replace(' ','').strip()
-
-    def keyEventHandler(self, event):
-	'''
-	function:
-	    keyEventHandler: function that is called whenever a button
-			     is pressed down
-
-	args:
-	    event: an event object that describes what event occurred
-
-	returns:
-	    None
-
-	raises:
-	    KeyError: a KeyError will be raised if a button other than 
-                      the arrow keys, enter, backspace, or alt is 
-                      pressed, however, this Error will be ignored.
-	'''
-
-        # These global variables are used to pass the messages between the handler and here
-        global CALL_INC
-        
-        # Get the event code
-        code = event.GetKeyCode()
-
-        self.turnOnBacklight(True)
-
-        # If the event is an up arrow key pressed...
-        if self.key_by_ascii_dict[code] == 'up':
-            # As long as we are not waiting for a message and there's no incoming call...
-            if not CALL_INC and not self.waiting_for_message:
-                # Only do anything if we are not at the top of the list.
-                # Decrement the pointers based on where we are in the GUI
-                if self.menu_ptr != 0:
-                    if self.current_top_ptr == self.menu_ptr:
-                        self.current_top_ptr-=1
-                    if self.current_selected_text_box != 0:
-                        self.current_selected_text_box-=1
-                    self.menu_ptr-=1
-
-                # Update the values in the text boxes
-                self.setValues()
-
-        # If the event is a down arrow key pressed...
-        if self.key_by_ascii_dict[code] == 'down':
-            # As long as we are not waiting for a message and there's no incoming call...
-            if not CALL_INC and not self.waiting_for_message:
-                # Get the list to use
-                list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
-                # Only do anything if we are not at the bottom of the list.
-                # Increment the pointers based on where we are in the GUI
-                if self.menu_ptr < len(list_to_use)-1:
-                    if self.menu_ptr - 2 == self.current_top_ptr:
-                        self.current_top_ptr+=1
-                    if self.current_selected_text_box != 2:
-                        self.current_selected_text_box+=1
-                    self.menu_ptr+=1
-
-                # If the user wants to go further, then request more call history
-                elif not self.end_of_call_history and not self.waiting_for_message and not self.using_settings and not self.using_blacklist:
-                    self.sendMessage('history_get','10:{}'.format(len(self.menu_items_list)-1),True)
-
-                elif self.using_blacklist and not self.end_of_blacklist and not self.waiting_for_message and not self.using_settings:
-                    self.sendMessage('blacklist_get','10:{}'.format(len(list_to_use)-1),True)
-
-                # Update the values in the text boxes
-                self.setValues()
-
-        # If the event is the user hitting enter (or check button)
-        if self.key_by_ascii_dict[code] == 'enter':
-            # If there is an incoming call...
-            if CALL_INC:
-                # Blacklist the incoming call and let the user know they blacklisted it
-                self.sendMessage('call_blacklist',CALL_REC_MSG,False)
-                self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
-
-            # Otherwise, if the user selected "Settings"...
-            elif self.menu_ptr == 0 and not self.using_settings and not self.using_blacklist:
-                # Reset the pointers and request the settings
-                self.using_settings = True
-                self.menu_ptr = 0
-                self.current_selected_text_box = 0
-                self.current_top_ptr = 0
-                self.end_of_settings_ptr = 1
-                self.firstTextBox.SetValue('\nLoading Current Settings...')
-                self.secondTextBox.SetValue('')
-                self.thirdTextBox.SetValue('')
-                self.sendMessage('settings_request_all', 'no', True)
-
-            # Otherwise, if the user is looking at the blacklist warning message
-            elif self.showing_warning:
-                self.sendMessage('blacklist_remove', self.unformatNumber(self.blacklist[self.menu_ptr]), False)
-                self.firstTextBox.SetValue('\nLoading Blacklist...')
-                self.thirdTextBox.SetValue('')
-                self.sendMessage('blacklist_get','10:0',True)
-                self.showing_warning = False
-                self.using_blacklist = True
-                self.blacklist = []
-
-            # Otherwise, if the user is removing an number from the blacklist
-            elif self.using_blacklist and self.blacklist[self.menu_ptr].strip() != 'End of Blacklist' and self.menu_ptr != 0:
-                self.showing_warning = True
-                self.firstTextBox.SetValue('Are you sure you want to remove this number from the blacklist?')
-                self.secondTextBox.SetValue('Press "Select" to confirm or "Back" to cancel')
-                num = self.blacklist[self.menu_ptr]
-                self.thirdTextBox.SetValue(self.blacklist[self.menu_ptr])
-
-            # Othwise, if the user tries to remove the top index (which is invalid)
-            elif self.using_blacklist and (self.menu_ptr == 0 or self.blacklist[self.menu_ptr].strip() == 'End of Blacklist'):
-                return
-
-            # Otherwise, if the user is selecting one of the setting states...
-            elif self.selecting_setting:
-                # If the user did not pick something that's not a setting state...
-                if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
-                    # Reset the pointers and tell the backend to save this setting
-                    self.selecting_setting = False
-                    state = self.setting_state_list[self.menu_ptr].strip()
-                    if self.state_name == 'Display timeout':
-                        self.timeout = int(state)
-                        self.on_time = datetime.now()
-                    self.sendMessage('setting_set', '{}:{}'.format(self.state_name, state), False)
-                    self.menu_ptr = 0
-                    self.current_selected_text_box = 0
-                    self.current_top_ptr = 0
-
-                    # Show the settings again
-                    self.firstTextBox.SetValue(self.settings_list[self.menu_ptr])
-                    self.secondTextBox.SetValue(self.settings_list[self.menu_ptr+1])
-                    self.thirdTextBox.SetValue(self.settings_list[self.menu_ptr+2])
-                    self.highlightBox(self.firstTextBox)
-
-            # Otherwise, if the user is selecting one of the settings...
-            elif self.using_settings:
-                # If the user is not at the end of the settings list
-                if self.settings_list[self.menu_ptr].strip() != 'End of Settings':
-
-                    if self.settings_list[self.menu_ptr].strip() == 'Blacklist':
-                        self.sendMessage('blacklist_get','10:0',True)
-                        self.menu_ptr = 0
-                        self.current_selected_text_box = 0
-                        self.current_top_ptr = 0
-                        self.using_blacklist = True
-                        self.firstTextBox.SetValue('\nLoading Blacklist...')
-                        self.secondTextBox.SetValue('')
-                        self.thirdTextBox.SetValue('')
-
-                    else:
-                        # Request the setting states from the backend and get
-                        # ready to display them
-                        self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
-                        # Reset the pointers
-                        self.menu_ptr = 1
-                        self.current_selected_text_box = 1
-                        self.current_top_ptr = 0
-                        self.selecting_setting = True
-                        self.firstTextBox.SetValue('\nLoading Selected Setting...')
-                        self.secondTextBox.SetValue('')
-                        self.thirdTextBox.SetValue('')
-            
-            elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
-                return
-
-            # else we are blacklisting a call from the history
-            else:
-                menuStr = self.menu_items_list[self.menu_ptr].split('\n')[0]
-                nameStr = self.menu_items_list[self.menu_ptr].split('\n')[1]
-
-                # ripped from https://stackoverflow.com/a/1451407
-                all = string.maketrans('', '')
-                nodigs = all.translate(all, string.digits)
-                numToBlacklist = menuStr.translate(all, nodigs) + ':' + nameStr.replace(' ','')
-                self.sendMessage('call_blacklist', numToBlacklist, False)
-                self.menu_items_list[self.menu_ptr] = '{}\nCaller blacklisted!\n{}'.format(self.line_space, self.line_space)
-                self.setValues()
-                
-
-        # If the user hits backspace (or cancel)
-        if self.key_by_ascii_dict[code] == 'backspace':
-            # If there is no incoming call and we are not waiting for a message...
-            if not CALL_INC and not self.waiting_for_message:
-                # If the user is seeing the blacklist warning
-                if self.showing_warning:
-                    self.showing_warning = False
-                    self.using_blacklist = True
-                    self.menu_ptr = 0
-                    self.current_selected_text_box = 0
-                    self.current_top_ptr = 0
-                    self.setValues()
-
-                # If the user is looking at the blacklist...
-                elif self.using_blacklist:
-                    self.using_blacklist = False
-                    self.using_settings = True
-                    self.menu_ptr = 0
-                    self.current_selected_text_box = 0
-                    self.current_top_ptr = 0
-                    self.setValues()
-
-                
-
-                # If the user is picking a setting state...
-                elif self.selecting_setting:
-                    # Reset the pointers and go back to settings
-                    self.menu_ptr = 0
-                    self.current_selected_text_box = 0
-                    self.current_top_ptr = 0
-                    self.selecting_setting = False
-                    self.firstTextBox.SetValue(self.settings_list[0])
-                    self.secondTextBox.SetValue(self.settings_list[1])
-                    self.thirdTextBox.SetValue(self.settings_list[2])
-                    self.highlightBox(self.firstTextBox)
-
-                # Otherwise, if the user is selecting settings...
-                elif self.using_settings:
-                    # Get the call history again
-                    self.using_settings = False
-                    self.menu_ptr = 1
-                    self.current_selected_text_box = 0
-                    self.current_top_ptr = 1
-                    self.setValues()
 
 # If running this program by itself (Please only do this...)
 if __name__ == '__main__':
