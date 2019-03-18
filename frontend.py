@@ -130,7 +130,9 @@ class FrontEnd(wx.Frame):
         # an index for reference.
         self.text_box_num_dict = {0:self.firstTextBox,
                                   1:self.secondTextBox,
-                                  2:self.thirdTextBox}
+                                  2:self.thirdTextBox,
+                                  3:self.fourthTextBox,
+                                  4:self.fifthTextBox}
 
         # Display a loading message until call history is loaded
         self.firstTextBox.SetValue('\nLoading Call History...')
@@ -241,7 +243,7 @@ class FrontEnd(wx.Frame):
         # Otherwise, if the user is selecting one of the setting states...
         elif self.selecting_setting:
             # If the user did not pick something that's not a setting state...
-            if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
+            if self.setting_state_list[self.menu_ptr].strip() != 'End of List':
                 # Reset the pointers and tell the backend to save this setting
                 self.selecting_setting = False
                 state = self.setting_state_list[self.menu_ptr].strip()
@@ -252,6 +254,9 @@ class FrontEnd(wx.Frame):
                 self.menu_ptr = 0
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
+
+                self.sizer.Hide(self.fourthTextBox)
+                self.sizer.Hide(self.fifthTextBox)
 
                 # Show the settings again
                 self.firstTextBox.SetValue(self.settings_list[self.menu_ptr])
@@ -279,13 +284,14 @@ class FrontEnd(wx.Frame):
                     # ready to display them
                     self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
                     # Reset the pointers
-                    self.menu_ptr = 1
+                    self.menu_ptr = 0
                     self.current_selected_text_box = 1
                     self.current_top_ptr = 0
                     self.selecting_setting = True
-                    self.firstTextBox.SetValue('\nLoading Selected Setting...')
-                    self.secondTextBox.SetValue('')
-                    self.thirdTextBox.SetValue('')
+                    self.sizer.Show(self.fourthTextBox)
+                    self.sizer.Show(self.fifthTextBox)
+                    self.fourthTextBox.SetValue('\n\nLoading Selected Setting...')
+                    self.fifthTextBox.SetValue('')
         
         elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
             return
@@ -333,10 +339,11 @@ class FrontEnd(wx.Frame):
         if not CALL_INC and not self.waiting_for_message:
             # Get the list to use
             list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
+
             # Only do anything if we are not at the bottom of the list.
             # Increment the pointers based on where we are in the GUI
             if self.menu_ptr < len(list_to_use)-1:
-                if self.menu_ptr - 2 == self.current_top_ptr:
+                if self.menu_ptr - 2 == self.current_top_ptr or self.selecting_setting:
                     self.current_top_ptr+=1
                 if self.current_selected_text_box != 2:
                     self.current_selected_text_box+=1
@@ -387,6 +394,8 @@ class FrontEnd(wx.Frame):
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
                 self.selecting_setting = False
+                self.sizer.Hide(self.fourthTextBox)
+                self.sizer.Hide(self.fifthTextBox)
                 self.firstTextBox.SetValue(self.settings_list[0])
                 self.secondTextBox.SetValue(self.settings_list[1])
                 self.thirdTextBox.SetValue(self.settings_list[2])
@@ -408,7 +417,6 @@ class FrontEnd(wx.Frame):
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
         GPIO.output(self.lcd_gpio, GPIO.HIGH)
-
 
     def turnOnBacklight(self, on):
         if on:
@@ -483,18 +491,15 @@ class FrontEnd(wx.Frame):
                     self.state_name = msg_list[0]
                     self.setting_state_list = []
 
-                    # Calculate the necessary space for the name and help message
-                    name_pad_space = int((32 - len(msg_list[0]))/2)
-                    help_pad_space = int((32 - len(msg_list[1]))/2)
-
-                    # Append the name, help message, and current state as the first entry
-                    self.setting_state_list.append('{}{}{}\nCurrently: {}\n{}{}{}'.format(name_pad_space*' ',msg_list[0],name_pad_space*' ',msg_list[2],help_pad_space*' ',msg_list[1],help_pad_space*' '))
+                    self.fourthTextBox.SetValue('{}\n{}'.format(msg_list[0],msg_list[1]))
                     
                     # Make a list of the states for that setting
                     states_list = msg_list[3].split(';')
 
                     # Append each state to the list
                     for state in states_list:
+                        if state == msg_list[2]:
+                            state = state + " *"
                         self.setting_state_list.append('{}\n{}\n{}'.format(self.line_space,state,self.line_space))
                     
                     # Add "End of List" as the last entry
@@ -734,6 +739,18 @@ class FrontEnd(wx.Frame):
         self.thirdTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,310),size=(800,170))
         self.thirdTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
+        self.fourthTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,0),size=(800,304))
+        self.fourthTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
+
+        self.fifthTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,310),size=(800,170))
+        self.fifthTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
+
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.sizer.Add(self.fourthTextBox, 0, 0, 0)
+        self.sizer.Add(self.fifthTextBox, 0, 0, 0)
+        self.sizer.Hide(self.fourthTextBox)
+        self.sizer.Hide(self.fifthTextBox)
+
     def loadCallHistory(self):
         '''
         function:
@@ -790,6 +807,8 @@ class FrontEnd(wx.Frame):
         self.firstTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.secondTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
         self.thirdTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
+        self.fourthTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
+        self.fifthTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
 
     def setValues(self):
 	'''
@@ -810,13 +829,18 @@ class FrontEnd(wx.Frame):
         # Pick the list to use so that we can update the correct values        
         list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
 
-        # Load the menu items based on what the current_top_ptr is pointing to
-        self.firstTextBox.SetValue(list_to_use[self.current_top_ptr])
-        self.secondTextBox.SetValue(list_to_use[self.current_top_ptr+1])
-        self.thirdTextBox.SetValue(list_to_use[self.current_top_ptr+2])
+        if self.selecting_setting:
+            self.fifthTextBox.SetValue(list_to_use[self.menu_ptr])
+            self.highlightBox(self.fifthTextBox)
 
-        # re-highlight the currently selected item
-        self.highlightBox(self.text_box_num_dict[self.current_selected_text_box])
+        else:
+            # Load the menu items based on what the current_top_ptr is pointing to
+            self.firstTextBox.SetValue(list_to_use[self.current_top_ptr])
+            self.secondTextBox.SetValue(list_to_use[self.current_top_ptr+1])
+            self.thirdTextBox.SetValue(list_to_use[self.current_top_ptr+2])
+
+            # re-highlight the currently selected item
+            self.highlightBox(self.text_box_num_dict[self.current_selected_text_box])
 
     def highlightBox(self, textBox):
 	'''
@@ -931,10 +955,11 @@ class FrontEnd(wx.Frame):
             if not CALL_INC and not self.waiting_for_message:
                 # Get the list to use
                 list_to_use = self.blacklist if self.using_blacklist else self.setting_state_list if self.selecting_setting else self.settings_list if self.using_settings else self.menu_items_list
+
                 # Only do anything if we are not at the bottom of the list.
                 # Increment the pointers based on where we are in the GUI
                 if self.menu_ptr < len(list_to_use)-1:
-                    if self.menu_ptr - 2 == self.current_top_ptr:
+                    if self.menu_ptr - 2 == self.current_top_ptr or self.selecting_setting:
                         self.current_top_ptr+=1
                     if self.current_selected_text_box != 2:
                         self.current_selected_text_box+=1
@@ -996,7 +1021,7 @@ class FrontEnd(wx.Frame):
             # Otherwise, if the user is selecting one of the setting states...
             elif self.selecting_setting:
                 # If the user did not pick something that's not a setting state...
-                if self.menu_ptr != 0 and self.setting_state_list[self.menu_ptr].strip() != 'End of List':
+                if self.setting_state_list[self.menu_ptr].strip() != 'End of List':
                     # Reset the pointers and tell the backend to save this setting
                     self.selecting_setting = False
                     state = self.setting_state_list[self.menu_ptr].strip()
@@ -1007,6 +1032,9 @@ class FrontEnd(wx.Frame):
                     self.menu_ptr = 0
                     self.current_selected_text_box = 0
                     self.current_top_ptr = 0
+
+                    self.sizer.Hide(self.fourthTextBox)
+                    self.sizer.Hide(self.fifthTextBox)
 
                     # Show the settings again
                     self.firstTextBox.SetValue(self.settings_list[self.menu_ptr])
@@ -1034,13 +1062,14 @@ class FrontEnd(wx.Frame):
                         # ready to display them
                         self.sendMessage('setting_get', self.settings_list[self.menu_ptr].strip(),True)
                         # Reset the pointers
-                        self.menu_ptr = 1
+                        self.menu_ptr = 0
                         self.current_selected_text_box = 1
                         self.current_top_ptr = 0
                         self.selecting_setting = True
-                        self.firstTextBox.SetValue('\nLoading Selected Setting...')
-                        self.secondTextBox.SetValue('')
-                        self.thirdTextBox.SetValue('')
+                        self.sizer.Show(self.fourthTextBox)
+                        self.sizer.Show(self.fifthTextBox)
+                        self.fourthTextBox.SetValue('\n\nLoading Selected Setting...')
+                        self.fifthTextBox.SetValue('')
             
             elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
                 return
@@ -1090,6 +1119,8 @@ class FrontEnd(wx.Frame):
                     self.current_selected_text_box = 0
                     self.current_top_ptr = 0
                     self.selecting_setting = False
+                    self.sizer.Hide(self.fourthTextBox)
+                    self.sizer.Hide(self.fifthTextBox)
                     self.firstTextBox.SetValue(self.settings_list[0])
                     self.secondTextBox.SetValue(self.settings_list[1])
                     self.thirdTextBox.SetValue(self.settings_list[2])
