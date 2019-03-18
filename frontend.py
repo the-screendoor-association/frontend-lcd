@@ -68,10 +68,6 @@ class FrontEnd(wx.Frame):
 
         self.button_gpios = [29,31,33,35]
         self.lcd_gpio = 38
-        self.button_handler_dict = {29:self.selectHandler(),
-                                    31:self.upHandler(),
-                                    33:self.downHandler(),
-                                    35:self.backHandler()}
 
         # Nsqd object used to transmit messages to localhost
         self.conn = gnsq.Nsqd(address='127.0.0.1',http_port=4151)
@@ -118,6 +114,11 @@ class FrontEnd(wx.Frame):
 
         # Setup GPIO pins for LCD and buttons
         self.setupGPIO()
+
+        self.button_handler_dict = {29:self.selectHandler(False),
+                                    31:self.upHandler(False),
+                                    33:self.downHandler(False),
+                                    35:self.backHandler(False)}
 
         # Center the GUI on the display
         self.Centre()
@@ -189,9 +190,12 @@ class FrontEnd(wx.Frame):
             if not GPIO.input(pin): # Check for a high to low edge
                 self.turnOnBacklight(True)
                 self.button_handler_dict[pin]
-
-    def selectHandler(self):
+        
+    def selectHandler(self, do_something = True):
         global CALL_INC
+
+        if not do_something:
+            return
 
         # If there is an incoming call...
         if CALL_INC:
@@ -299,8 +303,12 @@ class FrontEnd(wx.Frame):
             self.menu_items_list[self.menu_ptr] = '{}\nCaller blacklisted!\n{}'.format(self.line_space, self.line_space)
             self.setValues()
 
-    def upHandler(self):
+    def upHandler(self, do_something = True):
         global CALL_INC
+
+        if not do_something:
+            return
+
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
             # Only do anything if we are not at the top of the list.
@@ -315,8 +323,12 @@ class FrontEnd(wx.Frame):
             # Update the values in the text boxes
             self.setValues()
 
-    def downHandler(self):
+    def downHandler(self, do_something = True):
         global CALL_INC
+
+        if not do_something:
+            return
+
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
             # Get the list to use
@@ -340,8 +352,12 @@ class FrontEnd(wx.Frame):
             # Update the values in the text boxes
             self.setValues()
 
-    def backHandler(self):
+    def backHandler(self, do_something = True):
         global CALL_INC
+
+        if not do_something:
+            return
+
         # If there is no incoming call and we are not waiting for a message...
         if not CALL_INC and not self.waiting_for_message:
             # If the user is seeing the blacklist warning
@@ -392,7 +408,7 @@ class FrontEnd(wx.Frame):
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
         GPIO.output(self.lcd_gpio, GPIO.HIGH)
-
+        
     def turnOnBacklight(self, on):
         if on:
             GPIO.output(self.lcd_gpio, GPIO.HIGH)
@@ -770,9 +786,9 @@ class FrontEnd(wx.Frame):
 	
         # Bind all 3 textboxes to go to the keyEventHandler whenever a key
         # is pressed down
-        self.firstTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
-        self.secondTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
-        self.thirdTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
+        #self.firstTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
+        #self.secondTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
+        #self.thirdTextBox.Bind(wx.EVT_KEY_DOWN, self.keyEventHandler)
 
     def setValues(self):
 	'''
