@@ -15,13 +15,15 @@ from Xlib import display
 from RPi import GPIO
 
 # Global variables to let the timer function know to do something
-global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE
+global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE, BTN_EVENT
 CALL_INC = False
 UPDATE = False
 CALL_REC = False
 CALL_REC_MSG = ''
 LOAD_HIST = False
 BLACK_GIVE = False
+BTN_EVENT = None
+BUTTON_DEBOUNCE = 250
 
 class FrontEnd(wx.Frame):
     '''
@@ -66,7 +68,10 @@ class FrontEnd(wx.Frame):
                                   8:'backspace',
                                   307:'alt'}
 
-        self.button_gpios = [29,31,33,35]
+        self.button_gpios = {29:'select',
+                             31:'up',
+                             33:'down',
+                             35:'back'}
         self.lcd_gpio = 38
 
         # Nsqd object used to transmit messages to localhost
@@ -115,10 +120,10 @@ class FrontEnd(wx.Frame):
         # Setup GPIO pins for LCD and buttons
         self.setupGPIO()
 
-        self.button_handler_dict = {29:self.selectHandler(False),
-                                    31:self.upHandler(False),
-                                    33:self.downHandler(False),
-                                    35:self.backHandler(False)}
+        self.button_handler_dict = {29:self.selectHandler,
+                                    31:self.upHandler,
+                                    33:self.downHandler,
+                                    35:self.backHandler}
 
         # Center the GUI on the display
         self.Centre()
@@ -156,12 +161,10 @@ class FrontEnd(wx.Frame):
         self.timer.Start(500)
 
     def onTimer(self, event):
-        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST
+        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BTN_EVENT
         elapsed_time = datetime.now() - self.on_time
         if elapsed_time.total_seconds() > self.timeout:
             self.turnOnBacklight(False)
-
-        self.checkForButtonPresses()
 
         if UPDATE:
             UPDATE = False
@@ -185,19 +188,30 @@ class FrontEnd(wx.Frame):
             self.loadCallHistory()
             LOAD_HIST = False
 
+        elif BTN_EVENT:
+            self.button_handler_dict[BTN_EVENT]()
+            BTN_EVENT = None
+
         self.timer.Start(5)
 
-    def checkForButtonPresses(self):
-        for pin in self.button_handler_dict.keys():
-            if not GPIO.input(pin): # Check for a high to low edge
-                self.turnOnBacklight(True)
-                self.button_handler_dict[pin]
+    def setupGPIO(self):
 
-    def selectHandler(self, do_something = True):
+        def buttonHandler(channel):
+            global BTN_EVENT
+            self.turnOnBacklight(True)
+            print 'Got button press: {}'.format(channel)
+            BTN_EVENT = channel
+
+        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(self.lcd_gpio, GPIO.OUT)
+        for pin in self.button_gpios.keys():
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.add_event_detect(pin, GPIO.FALLING, callback=buttonHandler, bouncetime=BUTTON_DEBOUNCE)
+
+        GPIO.output(self.lcd_gpio, GPIO.HIGH)
+
+    def selectHandler(self):
         global CALL_INC
-
-        if not do_something:
-            return
 
         # If there is an incoming call...
         if CALL_INC:
@@ -309,11 +323,8 @@ class FrontEnd(wx.Frame):
             self.menu_items_list[self.menu_ptr] = '{}\nCaller blacklisted!\n{}'.format(self.line_space, self.line_space)
             self.setValues()
 
-    def upHandler(self, do_something = True):
+    def upHandler(self):
         global CALL_INC
-
-        if not do_something:
-            return
 
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
@@ -329,11 +340,8 @@ class FrontEnd(wx.Frame):
             # Update the values in the text boxes
             self.setValues()
 
-    def downHandler(self, do_something = True):
+    def downHandler(self):
         global CALL_INC
-
-        if not do_something:
-            return
 
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
@@ -359,11 +367,8 @@ class FrontEnd(wx.Frame):
             # Update the values in the text boxes
             self.setValues()
 
-    def backHandler(self, do_something = True):
+    def backHandler(self):
         global CALL_INC
-
-        if not do_something:
-            return
 
         # If there is no incoming call and we are not waiting for a message...
         if not CALL_INC and not self.waiting_for_message:
@@ -409,14 +414,6 @@ class FrontEnd(wx.Frame):
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 1
                 self.setValues()
-
-    def setupGPIO(self):
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(self.lcd_gpio, GPIO.OUT)
-        for pin in self.button_gpios:
-            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-        GPIO.output(self.lcd_gpio, GPIO.HIGH)
 
     def turnOnBacklight(self, on):
         if on:
