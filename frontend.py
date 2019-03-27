@@ -596,6 +596,7 @@ class FrontEnd(wx.Frame):
             '''
             global CALL_INC
             CALL_INC = True
+            self.turnOnBacklight(True)
             print 'Got call received message: {}'.format(message.body)
             frontend_conn.send(['call_rec',message.body])
             print 'Displaying caller info and waiting 30 sec...'
