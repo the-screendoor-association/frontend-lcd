@@ -15,7 +15,8 @@ from Xlib import display
 from RPi import GPIO
 
 # Global variables to let the timer function know to do something
-global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE, BTN_EVENT
+global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE, BTN_EVENT, SW_EVENT
+
 CALL_INC = False
 UPDATE = False
 CALL_REC = False
@@ -23,7 +24,9 @@ CALL_REC_MSG = ''
 LOAD_HIST = False
 BLACK_GIVE = False
 BTN_EVENT = None
+SW_EVENT = None
 BUTTON_DEBOUNCE = 250
+SWITCH_DEBOUNCE = 1000
 
 class FrontEnd(wx.Frame):
     '''
@@ -68,10 +71,6 @@ class FrontEnd(wx.Frame):
                                   8:'backspace',
                                   307:'alt'}
 
-        self.button_gpios = {29:'select',
-                             31:'up',
-                             33:'down',
-                             35:'back'}
         self.lcd_gpio = 38
 
         # Nsqd object used to transmit messages to localhost
@@ -99,6 +98,7 @@ class FrontEnd(wx.Frame):
         self.state_name = ''
         self.timeout = 30
         self.on_time = datetime.now()
+        self.switch_state_time = datetime.now()
         self.first_timeout_message = True
 
         # 32 spaces which is enough for a blank line
@@ -117,13 +117,16 @@ class FrontEnd(wx.Frame):
         # This is the blacklist. It will contain different numbers that have been blacklisted
         self.blacklist = []
 
-        # Setup GPIO pins for LCD and buttons
-        self.setupGPIO()
-
         self.button_handler_dict = {29:self.selectHandler,
                                     31:self.upHandler,
                                     33:self.downHandler,
                                     35:self.backHandler}
+
+        self.switch_handler_dict = {37:self.wildcardSWHandler,
+                                    40:self.filterSWHandler}
+
+        # Setup GPIO pins for LCD and buttons
+        self.setupGPIO()
 
         # Center the GUI on the display
         self.Centre()
@@ -161,10 +164,15 @@ class FrontEnd(wx.Frame):
         self.timer.Start(500)
 
     def onTimer(self, event):
-        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BTN_EVENT
+        global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BTN_EVENT, SW_EVENT
         elapsed_time = datetime.now() - self.on_time
         if elapsed_time.total_seconds() > self.timeout:
             self.turnOnBacklight(False)
+
+        if (datetime.now() - self.switch_state_time).total_seconds() > 60:
+            self.sendMessage('setting_set','Wildcards:{}'.format('Disabled' if GPIO.input(37) else 'Enabled'), False)
+            self.sendMessage('setting_set','Filter Disable:{}'.format('Disabled' if GPIO.input(40) else 'Enabled'), False)
+            self.switch_state_time = datetime.now()
 
         if UPDATE:
             UPDATE = False
@@ -192,6 +200,10 @@ class FrontEnd(wx.Frame):
             self.button_handler_dict[BTN_EVENT]()
             BTN_EVENT = None
 
+        elif SW_EVENT:
+            self.switch_handler_dict[SW_EVENT]()
+            SW_EVENT = None
+
         self.timer.Start(5)
 
     def setupGPIO(self):
@@ -202,13 +214,31 @@ class FrontEnd(wx.Frame):
             print 'Got button press: {}'.format(channel)
             BTN_EVENT = channel
 
+        def switchHandler(channel):
+            global SW_EVENT
+            self.turnOnBacklight(True)
+            print 'Got switch event: {}'.format(channel)
+            SW_EVENT = channel
+
         GPIO.setmode(GPIO.BOARD)
         GPIO.setup(self.lcd_gpio, GPIO.OUT)
-        for pin in self.button_gpios.keys():
+        for pin in self.button_handler_dict.keys():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.add_event_detect(pin, GPIO.FALLING, callback=buttonHandler, bouncetime=BUTTON_DEBOUNCE)
 
         GPIO.output(self.lcd_gpio, GPIO.HIGH)
+
+        for pin in self.switch_handler_dict.keys():
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.add_event_detect(pin, GPIO.BOTH, callback=switchHandler, bouncetime=SWITCH_DEBOUNCE)
+
+    def wildcardSWHandler(self):
+        time.sleep(0.5)
+        self.sendMessage('setting_set','Wildcards:{}'.format('Disabled' if GPIO.input(37) else 'Enabled'), False)
+
+    def filterSWHandler(self):
+        time.sleep(0.5)
+        self.sendMessage('setting_set','Filter Disable:{}'.format('Disabled' if GPIO.input(40) else 'Enabled'), False)
 
     def selectHandler(self):
         global CALL_INC
@@ -415,7 +445,6 @@ class FrontEnd(wx.Frame):
                 self.secondTextBox.SetValue('')
                 self.thirdTextBox.SetValue('')
                 self.sendMessage('history_get','10:0',True)
-                self.setValues()
 
     def turnOnBacklight(self, on):
         if on:
