@@ -13,6 +13,7 @@ from multiprocessing import Process, Pipe
 from datetime import datetime
 from Xlib import display
 from RPi import GPIO
+from os import system
 
 # Global variables to let the timer function know to do something
 global CALL_INC, UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BLACK_GIVE, BTN_EVENT, SW_EVENT
@@ -95,10 +96,13 @@ class FrontEnd(wx.Frame):
         self.using_blacklist = False
         self.end_of_blacklist = False
         self.showing_warning = False
+        self.showing_error_message = False
+        self.fatal_error = False
         self.state_name = ''
         self.timeout = 30
         self.on_time = datetime.now()
         self.switch_state_time = datetime.now()
+        self.heartbeat_timer = datetime.now()
         self.first_timeout_message = True
 
         # 32 spaces which is enough for a blank line
@@ -174,6 +178,12 @@ class FrontEnd(wx.Frame):
             self.sendMessage('setting_set','Filter Disable:{}'.format('Disabled' if GPIO.input(40) else 'Enabled'), False)
             self.switch_state_time = datetime.now()
 
+        if (datetime.now() - self.heartbeat_timer).total_seconds() > 180:
+            self.firstTextBox.SetValue('\nA fatal error has occured')
+            self.secondTextBox.SetValue('\nPress any key to reboot')
+            self.thirdTextBox.SetValue('')
+            self.fatal_error = True
+
         if UPDATE:
             UPDATE = False
             self.setValues()
@@ -248,6 +258,14 @@ class FrontEnd(wx.Frame):
             # Blacklist the incoming call and let the user know they blacklisted it
             self.sendMessage('call_blacklist',CALL_REC_MSG,False)
             self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
+
+        if self.showing_error_message:
+            self.showing_error_message = False
+            self.setValues()
+            return
+
+        if self.fatal_error:
+            system('sudo reboot')
 
         # Otherwise, if the user selected "Settings"...
         elif self.menu_ptr == 0 and not self.using_settings and not self.using_blacklist:
@@ -356,6 +374,14 @@ class FrontEnd(wx.Frame):
     def upHandler(self):
         global CALL_INC
 
+        if self.showing_error_message:
+            self.showing_error_message = False
+            self.setValues()
+            return
+
+        if self.fatal_error:
+            system('sudo reboot')
+
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
             # Only do anything if we are not at the top of the list.
@@ -372,6 +398,14 @@ class FrontEnd(wx.Frame):
 
     def downHandler(self):
         global CALL_INC
+
+        if self.showing_error_message:
+            self.showing_error_message = False
+            self.setValues()
+            return
+
+        if self.fatal_error:
+            system('sudo reboot')
 
         # As long as we are not waiting for a message and there's no incoming call...
         if not CALL_INC and not self.waiting_for_message:
@@ -410,6 +444,14 @@ class FrontEnd(wx.Frame):
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
                 self.setValues()
+
+            if self.showing_error_message:
+                self.showing_error_message = False
+                self.setValues()
+                return
+
+            if self.fatal_error:
+               system('sudo reboot')
 
             # If the user is looking at the blacklist...
             elif self.using_blacklist:
@@ -553,6 +595,15 @@ class FrontEnd(wx.Frame):
                 elif msg[0] == 'black_give':
                     self.load_blacklist(msg[1])
                     UPDATE = True
+
+                elif msg[0] == 'heartbeat':
+                    self.heartbeat_timer = datetime.now()
+
+                elif msg[0] == 'error':
+                    self.showing_error_message = True
+                    self.firstTextBox.SetValue('\nAn Error has occurred!')
+                    self.secondTextBox.SetValue(msg[1])
+                    self.thirdTextBox.SetValue('Press any key to continue...')
                     
             time.sleep(0.05)
 
@@ -604,6 +655,8 @@ class FrontEnd(wx.Frame):
         set_all_reader = gnsq.Reader('settings_all', 'frontend_lcd', '127.0.0.1:4150')
         set_give_reader = gnsq.Reader('setting_give', 'frontend_lcd', '127.0.0.1:4150')
         black_give_reader = gnsq.Reader('blacklist_give', 'frontend_lcd', '127.0.0.1:4150')
+        heartbeat_reader = gnsq.Reader('heartbeat', 'frontend_lcd', '127.0.0.1:4150')
+        error_reader = gnsq.Reader('error', 'frontend_lcd', '127.0.0.1:4150')
 
         global frontend_conn
         frontend_conn = pipe
@@ -706,15 +759,63 @@ class FrontEnd(wx.Frame):
             args:
                 reader: an instance of the reader object
                 message: an object that contains the message 
+
+            returns:
+                None
+
+            raises:
+                None
             '''
             print 'Got blacklist give message: {}'.format(message.body)
             frontend_conn.send(['black_give',message.body])
+
+        @heartbeat_reader.on_message.connect
+        def heartbeat_handler(reader, message):
+            '''
+            function:
+                heartbeat_handler: This function handles what to do when a
+                message from topic heartbeat is received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            print 'Got heartbeat message'
+            frontend_conn.send(['heartbeat', message.body])
+
+        @error_reader.on_message.connect
+        def error_handler(reader, message):
+            '''
+            function:
+                error_handler: This function handles what to do when a message
+                               from topic error_handler is received
+
+            args:
+                reader: an instance of the reader object
+                message: an object that contains the message
+
+            returns:
+                None
+
+            raises:
+                None
+            '''
+            print 'Got error message: {}'.format(message.body)
+            frontend_conn.send(['error',message.body])
 
         call_rec_reader.start(block=False)
         hist_give_reader.start(block=False)
         set_all_reader.start(block=False)
         set_give_reader.start(block=False)
-        black_give_reader.start()
+        black_give_reader.start(block=False)
+        heartbeat_reader.start(block=False)
+        error_reader.start()
 
     def sendMessage(self, topic, message, wait):
         '''
