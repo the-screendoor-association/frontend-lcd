@@ -390,8 +390,6 @@ class FrontEnd(wx.Frame):
                 self.current_top_ptr = 0
                 self.setValues()
 
-            
-
             # If the user is picking a setting state...
             elif self.selecting_setting:
                 # Reset the pointers and go back to settings
@@ -413,6 +411,10 @@ class FrontEnd(wx.Frame):
                 self.menu_ptr = 1
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 1
+                self.firstTextBox.SetValue('\nLoading Call History...')
+                self.secondTextBox.SetValue('')
+                self.thirdTextBox.SetValue('')
+                self.sendMessage('history_get','10:0',True)
                 self.setValues()
 
     def turnOnBacklight(self, on):
