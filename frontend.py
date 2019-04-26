@@ -7,6 +7,7 @@
  Last Modified: 3/27/2019
 '''
 
+# Necessary imports for frontend.py
 import wx, gnsq, time, string
 from threading import Thread
 from multiprocessing import Process, Pipe
@@ -72,6 +73,7 @@ class FrontEnd(wx.Frame):
                                   8:'backspace',
                                   307:'alt'}
 
+        # Pin number on the pi to represent the LCD GPIO pin
         self.lcd_gpio = 38
 
         # Nsqd object used to transmit messages to localhost
@@ -121,11 +123,13 @@ class FrontEnd(wx.Frame):
         # This is the blacklist. It will contain different numbers that have been blacklisted
         self.blacklist = []
 
+        # Function to call based on what pin on the pi received a falling edge (button push)
         self.button_handler_dict = {29:self.selectHandler,
                                     31:self.upHandler,
                                     33:self.downHandler,
                                     35:self.backHandler}
 
+        # Function to call based on what pin on the pi received either edge (switch flip)
         self.switch_handler_dict = {37:self.wildcardSWHandler,
                                     40:self.filterSWHandler}
 
@@ -154,6 +158,7 @@ class FrontEnd(wx.Frame):
         reader_proc = Process(target=self.readerThreads, args=(reader_child_pipe,))
         reader_proc.start()
 
+        # Start a thread to watch for messages from the pipe
         msg_proc = Thread(target=self.checkForMessages, args=(self.reader_pipe,))
         msg_proc.start()
 
@@ -163,31 +168,55 @@ class FrontEnd(wx.Frame):
         # Ask the backend for a call history of 10 elements to start with
         self.setupCallHistory()
 
+        # Create a wx event timer to constantly poll for new nsq messages
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.onTimer)
         self.timer.Start(500)
 
     def onTimer(self, event):
+        '''
+            function:
+                onTimer: This is the event timer function that polls for new
+                         nsq messages
+
+            args:
+                event: event that caused this to fire (unused)
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
+        # Global variables that indicate when to update the GUI and also hold nsq messages
         global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, BTN_EVENT, SW_EVENT
+
+        # Turn off the backlight if the user has not pushed a button in the timeout
         elapsed_time = datetime.now() - self.on_time
         if elapsed_time.total_seconds() > self.timeout:
             self.turnOnBacklight(False)
 
+        # Every 60 seconds, check the switches to make sure they haven't changed
         if (datetime.now() - self.switch_state_time).total_seconds() > 60:
             self.sendMessage('setting_set','Wildcards:{}'.format('Disabled' if GPIO.input(37) else 'Enabled'), False)
             self.sendMessage('setting_set','Filter Disable:{}'.format('Disabled' if GPIO.input(40) else 'Enabled'), False)
             self.switch_state_time = datetime.now()
 
+        # Every 3 minutes, if we haven't seen a heartbeat messgae from the backend,
+        # assume the backend is dead. Prompt the user to reboot
         if (datetime.now() - self.heartbeat_timer).total_seconds() > 180:
             self.firstTextBox.SetValue('\nA fatal error has occured')
             self.secondTextBox.SetValue('\nPress any key to reboot')
             self.thirdTextBox.SetValue('')
             self.fatal_error = True
 
+        # If we have to update the GUI, do it here
         if UPDATE:
             UPDATE = False
             self.setValues()
 
+        # Otherwise, if we are receiving a call...
         elif CALL_REC:
             # Get the incoming call info, format it, and display it on the screen
             msg_list = CALL_REC_MSG.split(':')
@@ -196,7 +225,9 @@ class FrontEnd(wx.Frame):
             self.secondTextBox.SetValue('{}\n{}'.format(msg_list[1],num))
             self.thirdTextBox.SetValue(u'Press the "Select" button to block this caller!')
             CALL_REC = False
-            
+
+        # Otherwise, if we are loading the call history, indicate on the display and
+        # request it from the backend.
         elif LOAD_HIST:
             self.selecting_setting = False
             self.using_settings = False
@@ -206,51 +237,143 @@ class FrontEnd(wx.Frame):
             self.loadCallHistory()
             LOAD_HIST = False
 
+        # Otherwise, if we received a button press, call the function accordingly
         elif BTN_EVENT:
             self.button_handler_dict[BTN_EVENT]()
             BTN_EVENT = None
 
+        # Otherwise, if we received a switch flip, call the function accordingly
         elif SW_EVENT:
             self.switch_handler_dict[SW_EVENT]()
             SW_EVENT = None
 
+        # Reset the timer to fire again in 5 milliseconds (so we don't hog the processor)
         self.timer.Start(5)
 
     def setupGPIO(self):
+        '''
+            function:
+                setupGPIO: This function prepares the pins connected to the switches
+                           and the buttons to handle GPIO input
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
 
         def buttonHandler(channel):
+            '''
+                function:
+                    buttonHandler: This function indicates that a button was pushed
+
+                args:
+                    None
+
+                returns:
+                    None
+
+                raises:
+                    None
+            '''
+
+            # Turn on the backlight since the user pushed a button. Set the global
+            # variable to the pin number of the button that was pushed
             global BTN_EVENT
             self.turnOnBacklight(True)
             print 'Got button press: {}'.format(channel)
             BTN_EVENT = channel
 
         def switchHandler(channel):
+            '''
+                function:
+                    switchHandler: This function indicates that a switch was flipped
+
+                args:
+                    None
+
+                returns:
+                    None
+
+                raises:
+                    None
+            '''
+            # Turn on the backlight since the user flipped a switch. Set the global
+            # variable to the pin number of the switch that was flipped
             global SW_EVENT
             self.turnOnBacklight(True)
             print 'Got switch event: {}'.format(channel)
             SW_EVENT = channel
 
+        # Set the pi to use pin numbers instead of BCM numbers
         GPIO.setmode(GPIO.BOARD)
+
+        # Set the lcd pin to GPIO output and the buttons to inputs
         GPIO.setup(self.lcd_gpio, GPIO.OUT)
         for pin in self.button_handler_dict.keys():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.add_event_detect(pin, GPIO.FALLING, callback=buttonHandler, bouncetime=BUTTON_DEBOUNCE)
 
+        # Set the lcd pin to initially be on and the switches to inputs
         GPIO.output(self.lcd_gpio, GPIO.HIGH)
-
         for pin in self.switch_handler_dict.keys():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.add_event_detect(pin, GPIO.BOTH, callback=switchHandler, bouncetime=SWITCH_DEBOUNCE)
 
     def wildcardSWHandler(self):
+        '''
+            function:
+                wildcardSWHandler: This function sends the wildcard message when the switch is flipped
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+        # Wait until the debounce stabilizes (500 ms) and then send the message based on the input value
         time.sleep(0.5)
         self.sendMessage('setting_set','Wildcards:{}'.format('Disabled' if GPIO.input(37) else 'Enabled'), False)
 
     def filterSWHandler(self):
+        '''
+            function:
+                filterSWHandler: This function sends the filter message when the switch is flipped
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+        # Wait until the debounce stablizes (500 ms) and then send the message based on the input value
         time.sleep(0.5)
         self.sendMessage('setting_set','Filter Disable:{}'.format('Disabled' if GPIO.input(40) else 'Enabled'), False)
 
     def selectHandler(self):
+        '''
+            function:
+                selectedHandler: This function handles what happens when select is pushed
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
         global CALL_INC
 
         # If there is an incoming call...
@@ -259,11 +382,14 @@ class FrontEnd(wx.Frame):
             self.sendMessage('call_blacklist',CALL_REC_MSG,False)
             self.thirdTextBox.SetValue('\nCaller Has Been Blocked!')
 
+        # If the error message is showing...
         if self.showing_error_message:
+            # Update the GUI
             self.showing_error_message = False
             self.setValues()
             return
 
+        # If the backend died, reboot the pi
         if self.fatal_error:
             system('sudo reboot')
 
@@ -309,14 +435,19 @@ class FrontEnd(wx.Frame):
                 # Reset the pointers and tell the backend to save this setting
                 self.selecting_setting = False
                 state = self.setting_state_list[self.menu_ptr].strip()
+
+                # If the setting state is display timeout, set the timeout value in memory as well
                 if self.state_name == 'Display timeout':
                     self.timeout = int(state)
                     self.on_time = datetime.now()
+
+                # Send the message to the backiend and reset the pointers
                 self.sendMessage('setting_set', '{}:{}'.format(self.state_name, state), False)
                 self.menu_ptr = 0
                 self.current_selected_text_box = 0
                 self.current_top_ptr = 0
 
+                # Hide the 2 displays if they are showing
                 self.sizer.Hide(self.fourthTextBox)
                 self.sizer.Hide(self.fifthTextBox)
 
@@ -330,7 +461,7 @@ class FrontEnd(wx.Frame):
         elif self.using_settings:
             # If the user is not at the end of the settings list
             if self.settings_list[self.menu_ptr].strip() != 'End of Settings':
-
+                # If the user selects the Blacklist option, get the blacklist from the backend
                 if self.settings_list[self.menu_ptr].strip() == 'Blacklist':
                     self.sendMessage('blacklist_get','10:0',True)
                     self.menu_ptr = 0
@@ -354,7 +485,8 @@ class FrontEnd(wx.Frame):
                     self.sizer.Show(self.fifthTextBox)
                     self.fourthTextBox.SetValue('\n\nLoading Selected Setting...')
                     self.fifthTextBox.SetValue('')
-        
+
+        # Don't let the user do anything on "End of Call History" or "Caller Blacklisted!"
         elif self.menu_items_list[self.menu_ptr].strip() == 'End of Call History' or self.menu_items_list[self.menu_ptr].strip() == 'Caller blacklisted!':
             return
 
@@ -372,13 +504,29 @@ class FrontEnd(wx.Frame):
             self.setValues()
 
     def upHandler(self):
+        '''
+            function:
+                upHandler: This function handles what to do when the user presses the up button
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
         global CALL_INC
 
+        # If the error message is showing, reset the values for the list we are in
         if self.showing_error_message:
             self.showing_error_message = False
             self.setValues()
             return
 
+        # If the backend died, reboot the pi
         if self.fatal_error:
             system('sudo reboot')
 
@@ -397,13 +545,29 @@ class FrontEnd(wx.Frame):
             self.setValues()
 
     def downHandler(self):
+        '''
+            function:
+                downHandler: This function handles what to do when the user presses the down button
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
         global CALL_INC
 
+        # If the error message is showing, reset the menu to its current list
         if self.showing_error_message:
             self.showing_error_message = False
             self.setValues()
             return
 
+        # If the backend died, reboot the pi
         if self.fatal_error:
             system('sudo reboot')
 
@@ -432,6 +596,20 @@ class FrontEnd(wx.Frame):
             self.setValues()
 
     def backHandler(self):
+        '''
+            function:
+                backHandler: This function handles what to do when the user presses the back button
+
+            args:
+                None
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
         global CALL_INC
 
         # If there is no incoming call and we are not waiting for a message...
@@ -445,11 +623,13 @@ class FrontEnd(wx.Frame):
                 self.current_top_ptr = 0
                 self.setValues()
 
+            # If the error message is showing, reset the menu to its current list
             if self.showing_error_message:
                 self.showing_error_message = False
                 self.setValues()
                 return
 
+            # If the backend died, reboot
             if self.fatal_error:
                system('sudo reboot')
 
@@ -489,6 +669,21 @@ class FrontEnd(wx.Frame):
                 self.sendMessage('history_get','10:0',True)
 
     def turnOnBacklight(self, on):
+        '''
+            function:
+                turnOnBacklight: This function turns on the backlight
+
+            args:
+                on: boolean to indicate if the backlight should be on or off
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
+        # Turn on or off the backlight accordingly and reset the time
         if on:
             GPIO.output(self.lcd_gpio, GPIO.HIGH)
             self.on_time = datetime.now()
@@ -496,7 +691,23 @@ class FrontEnd(wx.Frame):
             GPIO.output(self.lcd_gpio, GPIO.LOW)
 
     def checkForMessages(self, reader_pipe=None):
+        '''
+            function:
+                checkForMessages: This function polls for new nsq messages and handles
+                                  them accordingly
+
+            args:
+                reader_pipe: Pipe object to pull messages from
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
         global UPDATE, CALL_REC, CALL_REC_MSG, LOAD_HIST, CALL_INC, BLACK_GIVE
+
+        # Constantly poll for new messages
         while True:
             if reader_pipe.poll():
                 msg = reader_pipe.recv()
@@ -578,27 +789,33 @@ class FrontEnd(wx.Frame):
                     # Indicate that the message has been received and load the GUI values
                     self.waiting_for_message = False
 
+                    # If we received the message from the start giving the timeout, set the value in memory
                     if self.first_timeout_message:
                         self.timeout = int(msg_list[2])
                         self.first_timeout_message = False
                     else:
                         UPDATE = True
 
+                # If the message is of topic "call received" set the global
                 elif msg[0] == 'call_rec':
                     CALL_INC = True
                     CALL_REC_MSG = msg[1]
                     CALL_REC = True
-                    
+
+                # If the message is of topic "load history" set the global
                 elif msg[0] == 'load_hist':
                     LOAD_HIST = True
 
+                # If the message is of topic "Blacklist give" set the global
                 elif msg[0] == 'black_give':
                     self.load_blacklist(msg[1])
                     UPDATE = True
 
+                # If the message is a heartbeat, reset the timer
                 elif msg[0] == 'heartbeat':
                     self.heartbeat_timer = datetime.now()
 
+                # IF the message is of topic "error" Display the error
                 elif msg[0] == 'error':
                     self.showing_error_message = True
                     self.firstTextBox.SetValue('\nAn Error has occurred!')
@@ -608,6 +825,22 @@ class FrontEnd(wx.Frame):
             time.sleep(0.05)
 
     def load_blacklist(self, msg):
+        '''
+            function:
+                load_blacklist: This function loads the blacklist and displays it
+                                on the GUI
+
+            args:
+                msg: nsq message that contains the data
+
+            returns:
+                None
+
+            raises:
+                None
+        '''
+
+        # Get the list and split it by ":"
         msg_list = msg.split(':')
         if msg_list[1] == '0' and not msg_list[0] == '0':
             # Reset the menu pointers and reload the history
@@ -628,7 +861,6 @@ class FrontEnd(wx.Frame):
         # element that is loaded
         else:
             numbers = msg_list[2].split(';')
-            #print 'numbers_list = {}'.format(numbers)
             for number in numbers:
                 self.blacklist.append('{}\n{} ({}) {} - {}\n{}'.format(self.line_space,number[:1],number[1:4],number[4:7],number[-4:],self.line_space))
 
@@ -875,6 +1107,8 @@ class FrontEnd(wx.Frame):
         self.fifthTextBox = wx.TextCtrl(self,style=wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_CENTRE|wx.TE_WORDWRAP,pos=(0,310),size=(800,170))
         self.fifthTextBox.SetFont(wx.Font(30,wx.MODERN,wx.NORMAL,wx.NORMAL))
 
+        # Create a sizer that overlays on top of the 3 text boxes to have 2 text boxes
+        # of a different size
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.fourthTextBox, 0, 0, 0)
         self.sizer.Add(self.fifthTextBox, 0, 0, 0)
